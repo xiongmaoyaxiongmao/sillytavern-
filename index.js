@@ -626,8 +626,10 @@ function createUi() {
     elements.hitStatus = document.getElementById(`${ID}-hit-status`);
     elements.status = document.getElementById(`${ID}-status`);
     elements.list = document.getElementById(`${ID}-list`);
+    elements.chatInput = document.querySelector('#send_textarea');
 
     mountToggleButton();
+    syncLauncherVisibility();
     syncSettingsToUi();
 
     elements.toggle.addEventListener('click', togglePanel);
@@ -640,6 +642,7 @@ function createUi() {
     elements.next.addEventListener('click', () => jumpRelative(1));
     elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
     elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
+    elements.chatInput?.addEventListener('input', syncLauncherVisibility);
     elements.list.addEventListener('click', event => {
         const button = event.target.closest('.stcsj-result');
         if (!button) {
@@ -673,9 +676,8 @@ function createUi() {
 }
 
 function mountToggleButton() {
-    const formShell = document.querySelector('#form_sheld');
     const sendForm = document.querySelector('#send_form');
-    if (!formShell || !sendForm) {
+    if (!sendForm) {
         elements.toggle.classList.add('stcsj-floating');
         return;
     }
@@ -685,11 +687,21 @@ function mountToggleButton() {
         row = document.createElement('div');
         row.id = `${ID}-launch-row`;
         row.className = 'stcsj-launch-row';
-        formShell.insertBefore(row, sendForm);
+        sendForm.append(row);
     }
 
     elements.toggle.classList.remove('stcsj-floating');
+    sendForm.classList.add('stcsj-send-form-mounted');
     row.append(elements.toggle);
+}
+
+function syncLauncherVisibility() {
+    const row = document.getElementById(`${ID}-launch-row`);
+    if (!row || elements.toggle.classList.contains('stcsj-floating')) {
+        return;
+    }
+
+    row.hidden = Boolean(elements.chatInput?.value?.trim());
 }
 
 function clearOnChatChange() {
