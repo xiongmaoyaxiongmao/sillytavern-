@@ -376,10 +376,14 @@ function renderResults() {
 
 function renderToolPanelLoading() {
     elements.toolPanel.innerHTML = `
-        <div class="stcsj-tool-title">酒馆工具</div>
+        <div class="stcsj-tool-title">
+            <span>酒馆工具</span>
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+        </div>
         <button id="${ID}-open-search" class="stcsj-tool-action" type="button">
             <i class="fa-solid fa-magnifying-glass"></i>
             <span>聊天搜索</span>
+            <i class="fa-solid fa-chevron-right"></i>
         </button>
         <div class="stcsj-tool-section-title">API 配置</div>
         <div class="stcsj-tool-empty">读取配置中...</div>
@@ -406,17 +410,21 @@ async function renderToolPanel() {
             return `
                 <button class="stcsj-profile-item ${active ? 'active' : ''}" data-profile="${escapeHtml(name)}" type="button">
                     <span>${escapeHtml(name)}</span>
-                    ${active ? '<i class="fa-solid fa-check"></i>' : ''}
+                    ${active ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-chevron-right"></i>'}
                 </button>
             `;
         }).join('')
         : '<div class="stcsj-tool-empty">没有找到连接配置。请确认 Connection Profiles 已启用。</div>';
 
     elements.toolPanel.innerHTML = `
-        <div class="stcsj-tool-title">酒馆工具</div>
+        <div class="stcsj-tool-title">
+            <span>酒馆工具</span>
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+        </div>
         <button id="${ID}-open-search" class="stcsj-tool-action" type="button">
             <i class="fa-solid fa-magnifying-glass"></i>
             <span>聊天搜索</span>
+            <i class="fa-solid fa-chevron-right"></i>
         </button>
         <div class="stcsj-tool-section-title">API 配置</div>
         <div class="stcsj-current-profile">
@@ -745,7 +753,7 @@ function clampToolBall() {
 
 function positionToolPanel() {
     const settings = getBallSettings();
-    const panelWidth = 270;
+    const panelWidth = 292;
     const panelHeight = 420;
     const ballWidth = elements.toggle.offsetWidth || 48;
     const ballHeight = elements.toggle.offsetHeight || 48;
@@ -846,7 +854,10 @@ function createUi() {
         <section id="${ID}-tool-panel" class="stcsj-tool-panel" aria-label="酒馆工具面板"></section>
         <section id="${ID}-panel" class="stcsj-panel" aria-label="聊天记录搜索">
             <div class="stcsj-header">
-                <input id="${ID}-input" type="search" autocomplete="off" placeholder="搜索当前聊天..." />
+                <label class="stcsj-search-field" for="${ID}-input">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input id="${ID}-input" type="search" autocomplete="off" placeholder="搜索当前聊天..." />
+                </label>
                 <button id="${ID}-close" class="stcsj-icon-btn" type="button" title="关闭" aria-label="关闭">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
