@@ -71,6 +71,7 @@
 
 .stcsj-header,
 .stcsj-actions,
+.stcsj-hit-nav,
 .stcsj-options {
     display: flex;
     align-items: center;
@@ -112,7 +113,8 @@
     padding-top: 4px;
 }
 
-.stcsj-actions span {
+.stcsj-actions span,
+.stcsj-hit-nav span {
     flex: 1;
     min-width: 0;
     overflow: hidden;
@@ -120,6 +122,15 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     opacity: 0.82;
+}
+
+.stcsj-hit-nav {
+    padding-top: 0;
+    padding-bottom: 8px;
+}
+
+.stcsj-hit-nav[hidden] {
+    display: none;
 }
 
 .stcsj-icon-btn {
@@ -212,6 +223,11 @@
     outline: 2px solid var(--SmartThemeQuoteColor, #7ab7ff);
     outline-offset: 3px;
     transition: outline-color 180ms ease;
+}
+
+::highlight(stcsj-current-hit) {
+    color: #121212;
+    background: #ffe16a;
 }
 
 @media (max-width: 640px) {

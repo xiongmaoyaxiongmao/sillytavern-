@@ -11,6 +11,7 @@ const state = {
     query: '',
     results: [],
     activeIndex: -1,
+    activeOccurrence: 0,
     initialized: false,
     searchToken: 0,
 };
@@ -204,6 +205,23 @@ function makeSnippet(text, query, caseSensitive) {
     ].join('');
 }
 
+function countOccurrences(text, query, caseSensitive) {
+    const plain = normalize(text, caseSensitive);
+    const needle = caseSensitive ? query : query.toLocaleLowerCase();
+    if (!plain || !needle) {
+        return 0;
+    }
+
+    let count = 0;
+    let index = plain.indexOf(needle);
+    while (index >= 0) {
+        count += 1;
+        index = plain.indexOf(needle, index + needle.length);
+    }
+
+    return count;
+}
+
 async function runSearch() {
     const token = ++state.searchToken;
     const settings = getSettings();
@@ -244,6 +262,7 @@ async function runSearch() {
             name: message.name || message.role || 'message',
             role: message.role || '',
             hidden: message.hidden,
+            matchCount: Math.max(1, countOccurrences(message.text, query, settings.caseSensitive)),
             snippet: makeSnippet(searchable, query, settings.caseSensitive),
         });
 
@@ -254,6 +273,7 @@ async function runSearch() {
 
     state.results = results;
     state.activeIndex = results.length ? 0 : -1;
+    state.activeOccurrence = 0;
     renderResults();
 }
 
@@ -265,6 +285,8 @@ function scheduleSearch() {
 
 function renderResults() {
     const count = state.results.length;
+    const activeResult = state.results[state.activeIndex];
+    const hitCount = activeResult?.matchCount ?? 0;
     const truncated = count >= getSettings().maxResults ? '+' : '';
     elements.status.textContent = state.query
         ? `${count}${truncated} 条结果`
@@ -272,6 +294,12 @@ function renderResults() {
 
     elements.prev.disabled = count === 0;
     elements.next.disabled = count === 0;
+    elements.hitPrev.disabled = hitCount <= 1;
+    elements.hitNext.disabled = hitCount <= 1;
+    elements.hitStatus.textContent = hitCount
+        ? `命中 ${Math.min(state.activeOccurrence + 1, hitCount)}/${hitCount}`
+        : '命中 0/0';
+    elements.hitNav.hidden = hitCount <= 1;
 
     if (!count) {
         elements.list.innerHTML = state.query
@@ -285,6 +313,7 @@ function renderResults() {
             <span class="stcsj-result-meta">
                 <span>#${result.id}</span>
                 <span>${escapeHtml(result.name)}</span>
+                <span>命中 ${result.matchCount}</span>
                 ${result.hidden ? '<span>hidden</span>' : ''}
             </span>
             <span class="stcsj-result-snippet">${result.snippet}</span>
@@ -341,13 +370,134 @@ function flashMessage(element) {
     setTimeout(() => element.classList.remove('stcsj-hit'), 2400);
 }
 
-async function jumpToResult(index) {
+function clearOccurrenceHighlight() {
+    if (globalThis.CSS?.highlights) {
+        CSS.highlights.delete('stcsj-current-hit');
+    }
+}
+
+function getMessageSearchRoot(element) {
+    return element.querySelector('.mes_text') || element;
+}
+
+function createRangeAt(root, start, end) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+            const parent = node.parentElement;
+            if (parent?.closest('.stcsj-panel, script, style')) {
+                return NodeFilter.FILTER_REJECT;
+            }
+
+            return NodeFilter.FILTER_ACCEPT;
+        },
+    });
+
+    let offset = 0;
+    let startNode = null;
+    let startOffset = 0;
+    let endNode = null;
+    let endOffset = 0;
+
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const nextOffset = offset + node.nodeValue.length;
+
+        if (!startNode && start >= offset && start <= nextOffset) {
+            startNode = node;
+            startOffset = start - offset;
+        }
+
+        if (!endNode && end >= offset && end <= nextOffset) {
+            endNode = node;
+            endOffset = end - offset;
+            break;
+        }
+
+        offset = nextOffset;
+    }
+
+    if (!startNode || !endNode) {
+        return null;
+    }
+
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    return range;
+}
+
+function findOccurrenceRanges(element, query, caseSensitive) {
+    const root = getMessageSearchRoot(element);
+    const text = root.textContent || '';
+    const haystack = caseSensitive ? text : text.toLocaleLowerCase();
+    const needle = caseSensitive ? query : query.toLocaleLowerCase();
+    const ranges = [];
+
+    if (!needle) {
+        return ranges;
+    }
+
+    let index = haystack.indexOf(needle);
+    while (index >= 0) {
+        const range = createRangeAt(root, index, index + needle.length);
+        if (range) {
+            ranges.push(range);
+        }
+        index = haystack.indexOf(needle, index + needle.length);
+    }
+
+    return ranges;
+}
+
+function scrollRangeIntoView(range) {
+    const rect = Array.from(range.getClientRects()).find(item => item.width || item.height);
+    if (!rect) {
+        return false;
+    }
+
+    window.scrollTo({
+        top: Math.max(0, rect.top + window.scrollY - window.innerHeight * 0.42),
+        behavior: 'smooth',
+    });
+
+    return true;
+}
+
+function highlightOccurrence(element, occurrenceIndex) {
+    clearOccurrenceHighlight();
+
+    const result = state.results[state.activeIndex];
+    if (!result || !state.query) {
+        return false;
+    }
+
+    const ranges = findOccurrenceRanges(element, state.query, getSettings().caseSensitive);
+    if (!ranges.length) {
+        return false;
+    }
+
+    const nextIndex = (occurrenceIndex + ranges.length) % ranges.length;
+    state.activeOccurrence = nextIndex;
+    result.matchCount = ranges.length;
+
+    const range = ranges[nextIndex];
+    if (globalThis.CSS?.highlights && globalThis.Highlight) {
+        CSS.highlights.set('stcsj-current-hit', new Highlight(range));
+    }
+
+    scrollRangeIntoView(range);
+    renderResults();
+    return true;
+}
+
+async function jumpToResult(index, occurrenceIndex = 0) {
     const result = state.results[index];
     if (!result) {
         return;
     }
 
     state.activeIndex = index;
+    state.activeOccurrence = occurrenceIndex;
     renderResults();
 
     const element = await ensureMessageRendered(result.id);
@@ -356,8 +506,10 @@ async function jumpToResult(index) {
         return;
     }
 
-    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    flashMessage(element);
+    if (!highlightOccurrence(element, occurrenceIndex)) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        flashMessage(element);
+    }
 }
 
 function jumpRelative(delta) {
@@ -367,6 +519,21 @@ function jumpRelative(delta) {
 
     const nextIndex = (state.activeIndex + delta + state.results.length) % state.results.length;
     jumpToResult(nextIndex);
+}
+
+async function jumpOccurrence(delta) {
+    const result = state.results[state.activeIndex];
+    if (!result) {
+        return;
+    }
+
+    const element = await ensureMessageRendered(result.id);
+    if (!element) {
+        return;
+    }
+
+    const nextOccurrence = (state.activeOccurrence + delta + result.matchCount) % result.matchCount;
+    highlightOccurrence(element, nextOccurrence);
 }
 
 function openPanel() {
@@ -429,6 +596,15 @@ function createUi() {
                     <i class="fa-solid fa-chevron-down"></i>
                 </button>
             </div>
+            <div id="${ID}-hit-nav" class="stcsj-hit-nav" hidden>
+                <button id="${ID}-hit-prev" class="stcsj-icon-btn" type="button" title="上一处命中" aria-label="上一处命中" disabled>
+                    <i class="fa-solid fa-arrow-left"></i>
+                </button>
+                <span id="${ID}-hit-status">命中 0/0</span>
+                <button id="${ID}-hit-next" class="stcsj-icon-btn" type="button" title="下一处命中" aria-label="下一处命中" disabled>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </div>
             <div id="${ID}-list" class="stcsj-list">
                 <div class="stcsj-empty">搜索当前聊天记录</div>
             </div>
@@ -444,6 +620,10 @@ function createUi() {
     elements.includeNames = document.getElementById(`${ID}-names`);
     elements.prev = document.getElementById(`${ID}-prev`);
     elements.next = document.getElementById(`${ID}-next`);
+    elements.hitNav = document.getElementById(`${ID}-hit-nav`);
+    elements.hitPrev = document.getElementById(`${ID}-hit-prev`);
+    elements.hitNext = document.getElementById(`${ID}-hit-next`);
+    elements.hitStatus = document.getElementById(`${ID}-hit-status`);
     elements.status = document.getElementById(`${ID}-status`);
     elements.list = document.getElementById(`${ID}-list`);
 
@@ -458,6 +638,8 @@ function createUi() {
     elements.includeNames.addEventListener('change', () => setSetting('includeNames', elements.includeNames.checked));
     elements.prev.addEventListener('click', () => jumpRelative(-1));
     elements.next.addEventListener('click', () => jumpRelative(1));
+    elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
+    elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
     elements.list.addEventListener('click', event => {
         const button = event.target.closest('.stcsj-result');
         if (!button) {
@@ -519,6 +701,8 @@ function clearOnChatChange() {
     state.query = '';
     state.results = [];
     state.activeIndex = -1;
+    state.activeOccurrence = 0;
+    clearOccurrenceHighlight();
     renderResults();
 }
 
