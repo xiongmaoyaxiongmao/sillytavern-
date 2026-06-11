@@ -1,62 +1,140 @@
-.stcsj-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    min-width: 96px;
-    height: 34px;
-    padding: 0 14px;
+.stcsj-tool-ball {
+    position: fixed;
+    z-index: 9999;
+    display: grid;
+    width: 48px;
+    height: 48px;
+    place-items: center;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.24));
     border-radius: 999px;
     color: var(--SmartThemeBodyColor, #f4f4f4);
     background: var(--SmartThemeBlurTintColor, rgba(28, 31, 38, 0.88));
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-    font-size: 14px;
-    line-height: 1;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+    font-size: 18px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.stcsj-tool-ball:hover,
+.stcsj-tool-ball:focus-visible,
+.stcsj-tool-ball.dragging {
+    outline: none;
+    transform: scale(1.06);
+    border-color: var(--SmartThemeQuoteColor, #7ab7ff);
+    color: var(--SmartThemeQuoteColor, #7ab7ff);
+}
+
+.stcsj-tool-ball.dragging {
+    cursor: grabbing;
+}
+
+.stcsj-tool-panel {
+    position: fixed;
+    z-index: 9998;
+    display: none;
+    width: 270px;
+    max-height: 420px;
+    overflow: hidden;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.18));
+    border-radius: 10px;
+    color: var(--SmartThemeBodyColor, #f4f4f4);
+    background: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.96));
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.38);
+    backdrop-filter: blur(12px);
+}
+
+.stcsj-tool-panel.open {
+    display: flex;
+    flex-direction: column;
+}
+
+.stcsj-tool-title,
+.stcsj-tool-section-title,
+.stcsj-current-profile,
+.stcsj-tool-refresh {
+    padding: 10px 12px;
+}
+
+.stcsj-tool-title {
+    font-weight: 700;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.16));
+}
+
+.stcsj-tool-action,
+.stcsj-profile-item,
+.stcsj-tool-refresh {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: calc(100% - 12px);
+    margin: 6px;
+    padding: 9px 10px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: inherit;
+    background: rgba(255, 255, 255, 0.055);
+    text-align: left;
     cursor: pointer;
 }
 
-.stcsj-launch-row {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    display: flex;
-    justify-content: center;
-    width: auto;
-    margin: 0;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 5;
-}
-
-.stcsj-send-form-mounted {
-    position: relative;
-}
-
-.stcsj-launch-row[hidden] {
-    display: none;
-}
-
-.stcsj-launch-row .stcsj-toggle {
-    pointer-events: auto;
-}
-
-.stcsj-toggle.stcsj-floating {
-    position: fixed;
-    right: 18px;
-    bottom: 96px;
-    z-index: 3000;
-}
-
-.stcsj-toggle.stcsj-floating span {
-    display: none;
-}
-
-.stcsj-toggle:hover,
-.stcsj-toggle:focus-visible {
-    outline: none;
+.stcsj-tool-action:hover,
+.stcsj-profile-item:hover,
+.stcsj-profile-item.active,
+.stcsj-tool-refresh:hover {
     border-color: var(--SmartThemeQuoteColor, #7ab7ff);
+    background: rgba(122, 183, 255, 0.12);
+}
+
+.stcsj-tool-section-title {
+    padding-bottom: 4px;
+    font-size: 12px;
+    opacity: 0.72;
+}
+
+.stcsj-current-profile {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 0;
+    font-size: 12px;
+    opacity: 0.86;
+}
+
+.stcsj-current-profile strong {
+    min-width: 0;
+    overflow: hidden;
     color: var(--SmartThemeQuoteColor, #7ab7ff);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcsj-profile-list {
+    overflow: auto;
+    max-height: 230px;
+}
+
+.stcsj-profile-item {
+    justify-content: space-between;
+}
+
+.stcsj-profile-item span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcsj-profile-item.loading {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.stcsj-tool-empty {
+    padding: 14px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    opacity: 0.72;
 }
 
 .stcsj-panel {
@@ -244,11 +322,6 @@
 }
 
 @media (max-width: 640px) {
-    .stcsj-toggle.stcsj-floating {
-        right: 10px;
-        bottom: 82px;
-    }
-
     .stcsj-panel {
         left: 50%;
         bottom: 132px;

@@ -5,6 +5,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     includeHidden: true,
     includeNames: true,
     maxResults: 300,
+    ballX: null,
+    ballY: null,
 });
 
 const state = {
@@ -13,6 +15,8 @@ const state = {
     activeIndex: -1,
     activeOccurrence: 0,
     initialized: false,
+    toolsOpen: false,
+    currentProfile: '',
     searchToken: 0,
 };
 
@@ -51,6 +55,55 @@ function setSetting(key, value) {
     settings[key] = value;
     saveSettings();
     scheduleSearch();
+}
+
+async function runSlashCommand(command) {
+    const context = getContext();
+    if (!context) {
+        return '';
+    }
+
+    try {
+        if (typeof context.executeSlashCommandsWithOptions === 'function') {
+            const result = await context.executeSlashCommandsWithOptions(command, {
+                handleExecutionErrors: true,
+                source: MODULE_NAME,
+            });
+            return typeof result?.pipe === 'string' ? result.pipe : '';
+        }
+
+        if (typeof context.executeSlashCommands === 'function') {
+            const result = await context.executeSlashCommands(command);
+            return typeof result?.pipe === 'string' ? result.pipe : (typeof result === 'string' ? result : '');
+        }
+    } catch (error) {
+        console.error('[SillyTavern Tool Ball] Slash command failed:', command, error);
+    }
+
+    return '';
+}
+
+function quoteSlashArg(value) {
+    const text = String(value ?? '');
+    return /\s/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
+}
+
+async function getProfiles() {
+    const raw = await runSlashCommand('/profile-list');
+    try {
+        const profiles = JSON.parse(raw);
+        return Array.isArray(profiles) ? profiles : [];
+    } catch {
+        return [];
+    }
+}
+
+async function getCurrentProfile() {
+    return (await runSlashCommand('/profile')).trim();
+}
+
+async function switchProfile(name) {
+    await runSlashCommand(`/profile ${quoteSlashArg(name)}`);
 }
 
 function escapeHtml(value) {
@@ -321,6 +374,85 @@ function renderResults() {
     `).join('');
 }
 
+function renderToolPanelLoading() {
+    elements.toolPanel.innerHTML = `
+        <div class="stcsj-tool-title">酒馆工具</div>
+        <button id="${ID}-open-search" class="stcsj-tool-action" type="button">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <span>聊天搜索</span>
+        </button>
+        <div class="stcsj-tool-section-title">API 配置</div>
+        <div class="stcsj-tool-empty">读取配置中...</div>
+    `;
+    elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
+        closeToolPanel();
+        openPanel();
+    });
+}
+
+async function renderToolPanel() {
+    renderToolPanelLoading();
+    const [profiles, current] = await Promise.all([getProfiles(), getCurrentProfile()]);
+    if (!state.toolsOpen) {
+        return;
+    }
+
+    state.currentProfile = current;
+    updateToolBallTitle();
+
+    const profileHtml = profiles.length
+        ? profiles.map(name => {
+            const active = name === current;
+            return `
+                <button class="stcsj-profile-item ${active ? 'active' : ''}" data-profile="${escapeHtml(name)}" type="button">
+                    <span>${escapeHtml(name)}</span>
+                    ${active ? '<i class="fa-solid fa-check"></i>' : ''}
+                </button>
+            `;
+        }).join('')
+        : '<div class="stcsj-tool-empty">没有找到连接配置。请确认 Connection Profiles 已启用。</div>';
+
+    elements.toolPanel.innerHTML = `
+        <div class="stcsj-tool-title">酒馆工具</div>
+        <button id="${ID}-open-search" class="stcsj-tool-action" type="button">
+            <i class="fa-solid fa-magnifying-glass"></i>
+            <span>聊天搜索</span>
+        </button>
+        <div class="stcsj-tool-section-title">API 配置</div>
+        <div class="stcsj-current-profile">
+            <span>当前</span>
+            <strong>${escapeHtml(current || '未知')}</strong>
+        </div>
+        <div class="stcsj-profile-list">${profileHtml}</div>
+        <button id="${ID}-refresh-profiles" class="stcsj-tool-refresh" type="button">
+            <i class="fa-solid fa-rotate"></i>
+            <span>刷新</span>
+        </button>
+    `;
+
+    elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
+        closeToolPanel();
+        openPanel();
+    });
+    elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
+    elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
+        item.addEventListener('click', async () => {
+            const name = item.getAttribute('data-profile');
+            if (!name || name === state.currentProfile) {
+                closeToolPanel();
+                return;
+            }
+
+            item.classList.add('loading');
+            await switchProfile(name);
+            state.currentProfile = await getCurrentProfile() || name;
+            updateToolBallTitle();
+            globalThis.toastr?.success?.(`已切换到：${name}`, 'SillyTavern Tool Ball');
+            closeToolPanel();
+        });
+    });
+}
+
 function findMessageElement(messageId) {
     return document.querySelector(`.mes[mesid="${messageId}"]`);
 }
@@ -558,6 +690,143 @@ function togglePanel() {
     }
 }
 
+function toggleToolPanel() {
+    if (state.toolsOpen) {
+        closeToolPanel();
+    } else {
+        openToolPanel();
+    }
+}
+
+function openToolPanel() {
+    state.toolsOpen = true;
+    elements.toolPanel.classList.add('open');
+    elements.toggle.setAttribute('aria-expanded', 'true');
+    positionToolPanel();
+    renderToolPanel();
+}
+
+function closeToolPanel() {
+    state.toolsOpen = false;
+    elements.toolPanel.classList.remove('open');
+    elements.toggle.setAttribute('aria-expanded', 'false');
+}
+
+function updateToolBallTitle() {
+    elements.toggle.title = state.currentProfile
+        ? `酒馆工具｜当前 API：${state.currentProfile}`
+        : '酒馆工具';
+}
+
+function getBallSettings() {
+    const settings = getSettings();
+    if (typeof settings.ballX !== 'number') {
+        settings.ballX = Math.max(12, window.innerWidth - 72);
+    }
+    if (typeof settings.ballY !== 'number') {
+        settings.ballY = Math.round(window.innerHeight * 0.62);
+    }
+    return settings;
+}
+
+function setBallPosition(x, y) {
+    elements.toggle.style.left = `${x}px`;
+    elements.toggle.style.top = `${y}px`;
+}
+
+function clampToolBall() {
+    const settings = getBallSettings();
+    const width = elements.toggle.offsetWidth || 48;
+    const height = elements.toggle.offsetHeight || 48;
+    settings.ballX = Math.max(8, Math.min(settings.ballX, window.innerWidth - width - 8));
+    settings.ballY = Math.max(8, Math.min(settings.ballY, window.innerHeight - height - 8));
+    setBallPosition(settings.ballX, settings.ballY);
+}
+
+function positionToolPanel() {
+    const settings = getBallSettings();
+    const panelWidth = 270;
+    const panelHeight = 420;
+    const ballWidth = elements.toggle.offsetWidth || 48;
+    const ballHeight = elements.toggle.offsetHeight || 48;
+    let left = settings.ballX + ballWidth + 10;
+    let top = settings.ballY - 10;
+
+    if (left + panelWidth > window.innerWidth - 8) {
+        left = settings.ballX - panelWidth - 10;
+    }
+    if (top + panelHeight > window.innerHeight - 8) {
+        top = window.innerHeight - panelHeight - 8;
+    }
+
+    elements.toolPanel.style.left = `${Math.max(8, left)}px`;
+    elements.toolPanel.style.top = `${Math.max(8, top)}px`;
+}
+
+function attachToolBallDrag() {
+    let dragging = false;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
+    let originX = 0;
+    let originY = 0;
+
+    elements.toggle.addEventListener('pointerdown', event => {
+        dragging = true;
+        moved = false;
+        startX = event.clientX;
+        startY = event.clientY;
+        const settings = getBallSettings();
+        originX = settings.ballX;
+        originY = settings.ballY;
+        elements.toggle.classList.add('dragging');
+        try {
+            elements.toggle.setPointerCapture(event.pointerId);
+        } catch {}
+    });
+
+    elements.toggle.addEventListener('pointermove', event => {
+        if (!dragging) {
+            return;
+        }
+
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+            moved = true;
+        }
+
+        const settings = getBallSettings();
+        settings.ballX = originX + dx;
+        settings.ballY = originY + dy;
+        clampToolBall();
+        if (state.toolsOpen) {
+            positionToolPanel();
+        }
+    });
+
+    const endDrag = event => {
+        if (!dragging) {
+            return;
+        }
+
+        dragging = false;
+        elements.toggle.classList.remove('dragging');
+        try {
+            elements.toggle.releasePointerCapture(event.pointerId);
+        } catch {}
+
+        if (moved) {
+            saveSettings();
+        } else {
+            toggleToolPanel();
+        }
+    };
+
+    elements.toggle.addEventListener('pointerup', endDrag);
+    elements.toggle.addEventListener('pointercancel', endDrag);
+}
+
 function syncSettingsToUi() {
     const settings = getSettings();
     elements.caseSensitive.checked = Boolean(settings.caseSensitive);
@@ -571,10 +840,10 @@ function createUi() {
     }
 
     document.body.insertAdjacentHTML('beforeend', `
-        <button id="${ID}-toggle" class="stcsj-toggle" type="button" title="搜索聊天记录" aria-label="搜索聊天记录" aria-expanded="false">
-            <i class="fa-solid fa-magnifying-glass"></i>
-            <span>聊天搜索</span>
+        <button id="${ID}-toggle" class="stcsj-tool-ball" type="button" title="酒馆工具" aria-label="酒馆工具" aria-expanded="false">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
         </button>
+        <section id="${ID}-tool-panel" class="stcsj-tool-panel" aria-label="酒馆工具面板"></section>
         <section id="${ID}-panel" class="stcsj-panel" aria-label="聊天记录搜索">
             <div class="stcsj-header">
                 <input id="${ID}-input" type="search" autocomplete="off" placeholder="搜索当前聊天..." />
@@ -612,6 +881,7 @@ function createUi() {
     `);
 
     elements.toggle = document.getElementById(`${ID}-toggle`);
+    elements.toolPanel = document.getElementById(`${ID}-tool-panel`);
     elements.panel = document.getElementById(`${ID}-panel`);
     elements.input = document.getElementById(`${ID}-input`);
     elements.close = document.getElementById(`${ID}-close`);
@@ -626,13 +896,10 @@ function createUi() {
     elements.hitStatus = document.getElementById(`${ID}-hit-status`);
     elements.status = document.getElementById(`${ID}-status`);
     elements.list = document.getElementById(`${ID}-list`);
-    elements.chatInput = document.querySelector('#send_textarea');
-
-    mountToggleButton();
-    syncLauncherVisibility();
+    clampToolBall();
+    attachToolBallDrag();
     syncSettingsToUi();
 
-    elements.toggle.addEventListener('click', togglePanel);
     elements.close.addEventListener('click', closePanel);
     elements.input.addEventListener('input', scheduleSearch);
     elements.caseSensitive.addEventListener('change', () => setSetting('caseSensitive', elements.caseSensitive.checked));
@@ -642,7 +909,6 @@ function createUi() {
     elements.next.addEventListener('click', () => jumpRelative(1));
     elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
     elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
-    elements.chatInput?.addEventListener('input', syncLauncherVisibility);
     elements.list.addEventListener('click', event => {
         const button = event.target.closest('.stcsj-result');
         if (!button) {
@@ -653,6 +919,11 @@ function createUi() {
     });
 
     document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && state.toolsOpen) {
+            closeToolPanel();
+            return;
+        }
+
         if (event.key === 'Escape' && elements.panel.classList.contains('open')) {
             closePanel();
             return;
@@ -660,6 +931,7 @@ function createUi() {
 
         if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLocaleLowerCase() === 'f') {
             event.preventDefault();
+            closeToolPanel();
             togglePanel();
             return;
         }
@@ -673,35 +945,23 @@ function createUi() {
             jumpRelative(event.shiftKey ? -1 : 1);
         }
     });
-}
 
-function mountToggleButton() {
-    const sendForm = document.querySelector('#send_form');
-    if (!sendForm) {
-        elements.toggle.classList.add('stcsj-floating');
-        return;
-    }
+    document.addEventListener('pointerdown', event => {
+        if (!state.toolsOpen) {
+            return;
+        }
+        if (elements.toolPanel.contains(event.target) || elements.toggle.contains(event.target)) {
+            return;
+        }
+        closeToolPanel();
+    });
 
-    let row = document.getElementById(`${ID}-launch-row`);
-    if (!row) {
-        row = document.createElement('div');
-        row.id = `${ID}-launch-row`;
-        row.className = 'stcsj-launch-row';
-        sendForm.append(row);
-    }
-
-    elements.toggle.classList.remove('stcsj-floating');
-    sendForm.classList.add('stcsj-send-form-mounted');
-    row.append(elements.toggle);
-}
-
-function syncLauncherVisibility() {
-    const row = document.getElementById(`${ID}-launch-row`);
-    if (!row || elements.toggle.classList.contains('stcsj-floating')) {
-        return;
-    }
-
-    row.hidden = Boolean(elements.chatInput?.value?.trim());
+    window.addEventListener('resize', () => {
+        clampToolBall();
+        if (state.toolsOpen) {
+            positionToolPanel();
+        }
+    });
 }
 
 function clearOnChatChange() {
@@ -725,6 +985,14 @@ function init() {
 
     state.initialized = true;
     createUi();
+    getCurrentProfile().then(profile => {
+        state.currentProfile = profile;
+        updateToolBallTitle();
+    });
+    window.setInterval(async () => {
+        state.currentProfile = await getCurrentProfile();
+        updateToolBallTitle();
+    }, 30000);
 
     const context = getContext();
     const eventTypes = context?.eventTypes ?? context?.event_types;
