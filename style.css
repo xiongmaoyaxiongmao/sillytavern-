@@ -1,18 +1,42 @@
 .stcsj-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 96px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.24));
+    border-radius: 999px;
+    color: var(--SmartThemeBodyColor, #f4f4f4);
+    background: var(--SmartThemeBlurTintColor, rgba(28, 31, 38, 0.88));
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.stcsj-launch-row {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin: 0 0 7px;
+    pointer-events: none;
+}
+
+.stcsj-launch-row .stcsj-toggle {
+    pointer-events: auto;
+}
+
+.stcsj-toggle.stcsj-floating {
     position: fixed;
     right: 18px;
     bottom: 96px;
     z-index: 3000;
-    display: grid;
-    width: 42px;
-    height: 42px;
-    place-items: center;
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.24));
-    border-radius: 8px;
-    color: var(--SmartThemeBodyColor, #f4f4f4);
-    background: var(--SmartThemeBlurTintColor, rgba(28, 31, 38, 0.88));
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
-    cursor: pointer;
+}
+
+.stcsj-toggle.stcsj-floating span {
+    display: none;
 }
 
 .stcsj-toggle:hover,
@@ -24,12 +48,13 @@
 
 .stcsj-panel {
     position: fixed;
-    right: 18px;
+    left: 50%;
     bottom: 146px;
     z-index: 3001;
     display: none;
     width: min(460px, calc(100vw - 24px));
     max-height: min(620px, calc(100vh - 190px));
+    transform: translateX(-50%);
     overflow: hidden;
     border: 1px solid var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.18));
     border-radius: 8px;
@@ -190,13 +215,13 @@
 }
 
 @media (max-width: 640px) {
-    .stcsj-toggle {
+    .stcsj-toggle.stcsj-floating {
         right: 10px;
         bottom: 82px;
     }
 
     .stcsj-panel {
-        right: 8px;
+        left: 50%;
         bottom: 132px;
         width: calc(100vw - 16px);
         max-height: calc(100vh - 150px);

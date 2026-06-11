@@ -406,6 +406,7 @@ function createUi() {
     document.body.insertAdjacentHTML('beforeend', `
         <button id="${ID}-toggle" class="stcsj-toggle" type="button" title="搜索聊天记录" aria-label="搜索聊天记录" aria-expanded="false">
             <i class="fa-solid fa-magnifying-glass"></i>
+            <span>聊天搜索</span>
         </button>
         <section id="${ID}-panel" class="stcsj-panel" aria-label="聊天记录搜索">
             <div class="stcsj-header">
@@ -446,6 +447,7 @@ function createUi() {
     elements.status = document.getElementById(`${ID}-status`);
     elements.list = document.getElementById(`${ID}-list`);
 
+    mountToggleButton();
     syncSettingsToUi();
 
     elements.toggle.addEventListener('click', togglePanel);
@@ -486,6 +488,26 @@ function createUi() {
             jumpRelative(event.shiftKey ? -1 : 1);
         }
     });
+}
+
+function mountToggleButton() {
+    const formShell = document.querySelector('#form_sheld');
+    const sendForm = document.querySelector('#send_form');
+    if (!formShell || !sendForm) {
+        elements.toggle.classList.add('stcsj-floating');
+        return;
+    }
+
+    let row = document.getElementById(`${ID}-launch-row`);
+    if (!row) {
+        row = document.createElement('div');
+        row.id = `${ID}-launch-row`;
+        row.className = 'stcsj-launch-row';
+        formShell.insertBefore(row, sendForm);
+    }
+
+    elements.toggle.classList.remove('stcsj-floating');
+    row.append(elements.toggle);
 }
 
 function clearOnChatChange() {
