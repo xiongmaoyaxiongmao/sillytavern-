@@ -532,6 +532,12 @@ function waitForSillyTavern(attempt = 0) {
     const eventTypes = context?.eventTypes ?? context?.event_types;
     if (context?.eventSource && eventTypes?.APP_READY) {
         context.eventSource.on(eventTypes.APP_READY, init);
+        setTimeout(init, 800);
+        return;
+    }
+
+    if (context?.chat && document.body) {
+        init();
         return;
     }
 
