@@ -192,6 +192,63 @@
     pointer-events: none;
 }
 
+
+.stcsj-tool-toggle {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: calc(100% - 12px);
+    margin: 6px;
+    padding: 9px 11px;
+    border: 1px solid rgba(122, 183, 255, 0.18);
+    border-radius: 8px;
+    background: rgba(122, 183, 255, 0.08);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.stcsj-tool-toggle input {
+    flex: 0 0 auto;
+}
+
+.stcsj-tool-toggle span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcsj-tool-note {
+    margin: 0 12px 6px;
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.72;
+}
+
+.stcsj-api-status-line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 4px 12px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    background: var(--stcsj-softer);
+    font-size: 12px;
+}
+
+.stcsj-api-status-line span,
+.stcsj-api-status-line small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcsj-api-status-line small {
+    opacity: 0.68;
+}
+
 .stcsj-tool-empty {
     padding: 14px 12px;
     font-size: 13px;
