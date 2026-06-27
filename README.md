@@ -2,22 +2,13 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
-## v0.5.2
+## v0.5.5
 
-- 改成 Git 可更新版：`manifest.json` 已添加 `homePage`，并把 `auto_update` 设为 `true`。
-- 保留 v0.5.1：搜索弹窗右上角 `API` 入口，可直接打开“预设/API 解耦”工具面板。
-- 保留：预设不改 API、锁定当前连接、API-only 切换 Profile、搜索跳转、自动加载旧楼层、收藏消息。
-
-## 本版修复 / 新增
-
-- 新增“预设不改 API”保护：扩展启动后会自动关闭 SillyTavern 的 `bind_preset_to_connection`，切换 Chat Completion Settings Preset 时不再顺手改 API / 模型 / 地址。
-- 新增切预设前拦截：监听 `OAI_PRESET_CHANGED_BEFORE`，在预设真正应用前移除 API 连接字段；就算官方开关一时没渲染出来，也能拦住一层。
-- 新增 API 锁：可以把当前 Connection Profile 锁住；如果某个预设或插件把 API 带跑，扩展会自动恢复到锁定的连接配置。
-- 保留 API-only Profile 切换：用悬浮球点 Profile 时默认只切 `api`、`api-url`、`model`、`proxy`、`secret-id`，不切 Settings Preset。
-- 新增“一键解绑已有 Profile 的预设”：删除 Connection Profiles 里已经保存的 `preset` 字段，并把 `preset` 加入排除列表。
-- 保留并修复聊天搜索：点击搜索结果跳转对应楼层。
-- 保留旧楼层自动加载：目标楼层还没渲染时，会循环触发 `#show_more_messages` 加载旧消息后再跳转。
-- 保留消息收藏：收藏保存在当前聊天的 `chatMetadata`，切换聊天不会串数据。
+- 新增“前后快照”：搜索结果和收藏项右侧多了 `快照` 按钮。
+- 点 `快照` 会在搜索窗口内打开目标楼层前 3 楼 / 后 3 楼。
+- 快照里的每一楼都有 `跳到这层`；如果楼层还没渲染，仍会自动加载旧消息后再跳转。
+- 快照会高亮当前搜索词；长消息会先截断显示，跳转到楼层可看全文。
+- 保留 v0.5.4 工具面板滚动修复、API / 预设解耦、搜索跳转和收藏功能。
 
 ## Git 安装 / 更新
 
@@ -55,13 +46,10 @@ Extensions -> Manage extensions
 ## 使用
 
 - 单击悬浮球打开工具面板。
-- 默认开启 `预设不改 API` 和 `锁定当前连接`。
-- 点 `把当前 API 设为锁定`，会把当前 Connection Profile 作为守护目标。
-- 之后正常切 Settings Preset；扩展会尽量保证 API / 模型 / endpoint 不跟着跑。
-- 点 Connection Profile 名称时，默认走 API-only 切换：换 API / 模型，不换当前 Settings Preset。
-- 点 `解绑已有 Profile 的预设`，会清理已保存 Profile 里的 Settings Preset 字段。
-- 点 `聊天搜索` 可搜索当前聊天；点击结果跳楼层。
+- 点 `聊天搜索` 可搜索当前聊天；点击结果跳楼层，点结果右侧 `快照` 可查看上下文快照。
 - 搜索结果右侧点星标可收藏消息；工具面板里的 `收藏消息` 可查看收藏。
+- 默认开启 `预设不改 API` 和 `锁定当前连接`。
+- 点 Connection Profile 名称时，默认走 API-only 切换：换 API / 模型，不换当前 Settings Preset。
 - `Ctrl+Shift+F` 可直接打开聊天搜索。
 
 ## API / 预设解耦机制
@@ -92,9 +80,3 @@ API-only Profile 切换主要调用这些斜杠命令：
 - `/secret-id`
 
 如果某些旧版本没有单字段切换命令，扩展会降级为完整 Profile 切换，然后恢复原来的 Settings Preset。
-
-## v0.5.4
-
-- 修复工具面板内容超出高度时不能滚动的问题。
-- 工具面板现在会根据当前窗口高度动态设置 `max-height`，底部按钮不再被裁掉。
-- 增加面板内部滚动保护，避免滚轮 / 触控板事件被 SillyTavern 页面滚动处理吞掉。

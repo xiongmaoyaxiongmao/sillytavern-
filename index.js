@@ -9,6 +9,9 @@
     const API_ONLY_PROFILE_COMMANDS = Object.freeze(['api', 'api-url', 'model', 'proxy', 'secret-id']);
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
+    const SNAPSHOT_BEFORE_COUNT = 3;
+    const SNAPSHOT_AFTER_COUNT = 3;
+    const SNAPSHOT_TEXT_LIMIT = 2200;
     const API_GUARD_ENFORCE_MS = 2500;
     const PROFILE_LOCK_POLL_MS = 5000;
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
@@ -32,6 +35,7 @@
     const state = {
         query: '',
         results: [],
+        messages: [],
         activeIndex: -1,
         activeOccurrence: 0,
         initialized: false,
@@ -40,6 +44,8 @@
         currentProfile: '',
         searchToken: 0,
         jumpToken: 0,
+        snapshotToken: 0,
+        snapshotTargetId: null,
         apiSwitching: false,
         profileRestoreTimer: null,
         suppressProfileRestoreUntil: 0,
@@ -424,6 +430,10 @@
             return globalThis.CSS.escape(String(value));
         }
         return String(value).replace(/["\\]/g, '\\$&');
+    }
+
+    function escapeRegExp(value) {
+        return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
@@ -958,6 +968,8 @@
             return;
         }
 
+        state.messages = messages;
+
         const needle = normalize(query, settings.caseSensitive);
         const results = [];
 
@@ -1170,7 +1182,7 @@
             const hidden = result.hidden ? '<span class="stcsj-badge">hidden</span>' : '';
             return `
                 <div class="stcsj-result-row">
-                    <button type="button" class="stcsj-result${active}" data-stcsj-action="jump-result" data-index="${index}">
+                    <button type="button" class="stcsj-result${active}" data-stcsj-action="jump-result" data-index="${index}" title="跳转到第 ${escapeHtml(result.id)} 楼">
                         <span class="stcsj-result-meta">
                             <span>#${escapeHtml(result.id)}</span>
                             <span>${escapeHtml(result.name)}</span>
@@ -1179,9 +1191,14 @@
                         </span>
                         <span class="stcsj-result-snippet">${result.snippet}</span>
                     </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-fav${favorite ? ' active' : ''}" data-stcsj-action="toggle-favorite" data-index="${index}" title="${favorite ? '取消收藏' : '收藏这层'}" aria-label="${favorite ? '取消收藏' : '收藏这层'}">
-                        <i class="${favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
-                    </button>
+                    <div class="stcsj-result-side">
+                        <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-result" data-index="${index}" title="查看前后快照" aria-label="查看前后快照">
+                            <i class="fa-solid fa-book-open"></i><span>快照</span>
+                        </button>
+                        <button type="button" class="stcsj-icon-btn stcsj-result-fav${favorite ? ' active' : ''}" data-stcsj-action="toggle-favorite" data-index="${index}" title="${favorite ? '取消收藏' : '收藏这层'}" aria-label="${favorite ? '取消收藏' : '收藏这层'}">
+                            <i class="${favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+                        </button>
+                    </div>
                 </div>`;
         }).join('');
     }
@@ -1207,7 +1224,7 @@
             const date = favorite.createdAt ? new Date(favorite.createdAt).toLocaleString() : '';
             return `
                 <div class="stcsj-result-row">
-                    <button type="button" class="stcsj-result stcsj-favorite-item" data-stcsj-action="jump-favorite" data-id="${escapeHtml(favorite.id)}">
+                    <button type="button" class="stcsj-result stcsj-favorite-item" data-stcsj-action="jump-favorite" data-id="${escapeHtml(favorite.id)}" title="跳转到第 ${escapeHtml(favorite.id)} 楼">
                         <span class="stcsj-result-meta">
                             <span>#${escapeHtml(favorite.id)}</span>
                             <span>${escapeHtml(favorite.name || roleLabel(favorite.role))}</span>
@@ -1216,11 +1233,171 @@
                         </span>
                         <span class="stcsj-result-snippet">${escapeHtml(favorite.preview || `第 ${favorite.id} 楼`)}</span>
                     </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-fav active" data-stcsj-action="remove-favorite" data-id="${escapeHtml(favorite.id)}" title="取消收藏" aria-label="取消收藏">
-                        <i class="fa-solid fa-star"></i>
-                    </button>
+                    <div class="stcsj-result-side">
+                        <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-favorite" data-id="${escapeHtml(favorite.id)}" title="查看前后快照" aria-label="查看前后快照">
+                            <i class="fa-solid fa-book-open"></i><span>快照</span>
+                        </button>
+                        <button type="button" class="stcsj-icon-btn stcsj-result-fav active" data-stcsj-action="remove-favorite" data-id="${escapeHtml(favorite.id)}" title="取消收藏" aria-label="取消收藏">
+                            <i class="fa-solid fa-star"></i>
+                        </button>
+                    </div>
                 </div>`;
         }).join('');
+    }
+
+    function normalizeSnapshotText(text) {
+        const plain = stripHtml(text)
+            .replace(/\r\n/g, '\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trim();
+        if (plain.length <= SNAPSHOT_TEXT_LIMIT) {
+            return { text: plain, truncated: false };
+        }
+        return { text: plain.slice(0, SNAPSHOT_TEXT_LIMIT), truncated: true };
+    }
+
+    function highlightSnapshotText(text, query = state.query) {
+        const normalized = normalizeSnapshotText(text);
+        const plain = normalized.text;
+        if (!plain) {
+            return '<em>空消息</em>';
+        }
+
+        const needle = String(query || '').trim();
+        if (!needle) {
+            return `${escapeHtml(plain).replace(/\n/g, '<br>')}${normalized.truncated ? '<div class="stcsj-snapshot-truncated">内容较长，已截断显示；跳转到楼层可看全文。</div>' : ''}`;
+        }
+
+        let regex;
+        try {
+            regex = new RegExp(escapeRegExp(needle), getSettings().caseSensitive ? 'g' : 'gi');
+        } catch {
+            return escapeHtml(plain).replace(/\n/g, '<br>');
+        }
+
+        let output = '';
+        let lastIndex = 0;
+        let match = regex.exec(plain);
+        while (match) {
+            output += escapeHtml(plain.slice(lastIndex, match.index));
+            output += `<mark>${escapeHtml(match[0])}</mark>`;
+            lastIndex = match.index + match[0].length;
+            if (regex.lastIndex === match.index) {
+                regex.lastIndex += 1;
+            }
+            match = regex.exec(plain);
+        }
+        output += escapeHtml(plain.slice(lastIndex));
+        output = output.replace(/\n/g, '<br>');
+        if (normalized.truncated) {
+            output += '<div class="stcsj-snapshot-truncated">内容较长，已截断显示；跳转到楼层可看全文。</div>';
+        }
+        return output;
+    }
+
+    function findMessageIndexById(messages, messageId) {
+        const textId = String(messageId ?? '');
+        const numericId = toFiniteInteger(messageId, null);
+        return messages.findIndex(message => String(message.id) === textId || (numericId !== null && message.id === numericId));
+    }
+
+    function getCachedMessages() {
+        const chat = getContext()?.chat;
+        if (Array.isArray(chat)) {
+            return chat.map(mapContextMessage).filter(message => Number.isInteger(message.id));
+        }
+        return Array.isArray(state.messages) ? state.messages : [];
+    }
+
+    function renderSnapshotEntries(messages, targetIndex) {
+        const start = Math.max(0, targetIndex - SNAPSHOT_BEFORE_COUNT);
+        const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_AFTER_COUNT);
+        const targetId = messages[targetIndex]?.id;
+        const entries = messages.slice(start, end + 1);
+
+        return entries.map((message, offset) => {
+            const absoluteIndex = start + offset;
+            const diff = absoluteIndex - targetIndex;
+            const isTarget = String(message.id) === String(targetId);
+            const hidden = message.hidden ? '<span class="stcsj-badge">hidden</span>' : '';
+            const diffLabel = diff === 0 ? '命中楼层' : (diff < 0 ? `前 ${Math.abs(diff)} 楼` : `后 ${diff} 楼`);
+            return `
+                <article class="stcsj-snapshot-message${isTarget ? ' target' : ''}">
+                    <div class="stcsj-snapshot-message-meta">
+                        <span>${escapeHtml(diffLabel)}</span>
+                        <span>#${escapeHtml(message.id)}</span>
+                        <strong>${escapeHtml(message.name || roleLabel(message.role))}</strong>
+                        ${hidden}
+                        <button type="button" class="stcsj-text-btn stcsj-snapshot-jump-small" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(message.id)}">跳到这层</button>
+                    </div>
+                    <div class="stcsj-snapshot-text">${highlightSnapshotText(message.text)}</div>
+                </article>`;
+        }).join('');
+    }
+
+    async function openSnapshotForMessage(messageId) {
+        const token = ++state.snapshotToken;
+        state.snapshotTargetId = messageId;
+        if (!elements.snapshot || !elements.snapshotBody) {
+            return;
+        }
+
+        elements.snapshot.hidden = false;
+        elements.snapshotTitle.textContent = `第 ${messageId} 楼前后快照`;
+        elements.snapshotSub.textContent = '正在读取当前聊天上下文...';
+        elements.snapshotJump.dataset.id = String(messageId);
+        elements.snapshotBody.innerHTML = '<div class="stcsj-empty">加载中...</div>';
+
+        try {
+            let messages = getCachedMessages();
+            if (!messages.length || findMessageIndexById(messages, messageId) < 0) {
+                messages = await readMessages();
+                state.messages = messages;
+            }
+            if (token !== state.snapshotToken) {
+                return;
+            }
+
+            const targetIndex = findMessageIndexById(messages, messageId);
+            if (targetIndex < 0) {
+                elements.snapshotSub.textContent = '当前聊天数据里没有找到这层。';
+                elements.snapshotBody.innerHTML = `
+                    <div class="stcsj-empty stcsj-snapshot-missing">
+                        <div>没有读到第 ${escapeHtml(messageId)} 楼的前后文。</div>
+                        <div class="stcsj-snapshot-position">可以先点下面按钮尝试跳转；如果是旧楼层，会自动加载旧消息。</div>
+                        <button type="button" class="stcsj-text-btn" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(messageId)}"><i class="fa-solid fa-location-arrow"></i>尝试跳到这层</button>
+                    </div>`;
+                return;
+            }
+
+            const target = messages[targetIndex];
+            const start = Math.max(0, targetIndex - SNAPSHOT_BEFORE_COUNT);
+            const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_AFTER_COUNT);
+            elements.snapshotTitle.textContent = `第 ${target.id} 楼前后快照`;
+            elements.snapshotSub.textContent = `显示 #${messages[start].id} - #${messages[end].id}，共 ${end - start + 1} 条。`;
+            elements.snapshotJump.dataset.id = String(target.id);
+            elements.snapshotBody.innerHTML = renderSnapshotEntries(messages, targetIndex);
+            requestAnimationFrame(() => {
+                elements.snapshotBody.querySelector('.stcsj-snapshot-message.target')?.scrollIntoView({ block: 'center' });
+            });
+        } catch (error) {
+            console.error('[Chat Search Jump] Failed to render snapshot.', error);
+            elements.snapshotSub.textContent = '读取失败';
+            elements.snapshotBody.innerHTML = '<div class="stcsj-empty">打开前后快照失败。请刷新页面后再试。</div>';
+        }
+    }
+
+    function closeSnapshot() {
+        if (!elements.snapshot) {
+            return;
+        }
+        elements.snapshot.hidden = true;
+        state.snapshotTargetId = null;
+    }
+
+    function isSnapshotOpen() {
+        return Boolean(elements.snapshot && !elements.snapshot.hidden);
     }
 
     function updateFavoriteCount() {
@@ -1837,6 +2014,7 @@
     }
 
     function closePanel() {
+        closeSnapshot();
         elements.panel.classList.remove('open');
         elements.toggle.setAttribute('aria-expanded', 'false');
     }
@@ -2030,6 +2208,7 @@
         document.getElementById(`${ID}-toggle`)?.remove();
         document.getElementById(`${ID}-tool-panel`)?.remove();
         document.getElementById(`${ID}-panel`)?.remove();
+        document.getElementById(`${ID}-snapshot`)?.remove();
 
         document.body.insertAdjacentHTML('beforeend', `
             <button type="button" id="${ID}-toggle" class="stcsj-tool-ball" title="酒馆工具" aria-label="酒馆工具" aria-expanded="false">
@@ -2066,6 +2245,20 @@
                     <button type="button" class="stcsj-icon-btn" id="${ID}-hit-next" title="下一处命中" aria-label="下一处命中"><i class="fa-solid fa-arrow-right"></i></button>
                 </div>
                 <div class="stcsj-list" id="${ID}-list"><div class="stcsj-empty">搜索当前聊天记录</div></div>
+                <div id="${ID}-snapshot" class="stcsj-snapshot" hidden>
+                    <div class="stcsj-snapshot-header">
+                        <div>
+                            <strong id="${ID}-snapshot-title">前后快照</strong>
+                            <small id="${ID}-snapshot-sub">查看命中楼层附近消息</small>
+                        </div>
+                        <button type="button" class="stcsj-icon-btn" id="${ID}-snapshot-close" title="关闭快照" aria-label="关闭快照"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="stcsj-snapshot-body" id="${ID}-snapshot-body"></div>
+                    <div class="stcsj-snapshot-footer">
+                        <span class="stcsj-snapshot-position">显示目标楼层前 3 楼 / 后 3 楼</span>
+                        <button type="button" class="stcsj-text-btn" id="${ID}-snapshot-jump"><i class="fa-solid fa-location-arrow"></i>跳到命中楼层</button>
+                    </div>
+                </div>
             </section>`);
 
         elements.toggle = document.getElementById(`${ID}-toggle`);
@@ -2089,6 +2282,12 @@
         elements.hitStatus = document.getElementById(`${ID}-hit-status`);
         elements.status = document.getElementById(`${ID}-status`);
         elements.list = document.getElementById(`${ID}-list`);
+        elements.snapshot = document.getElementById(`${ID}-snapshot`);
+        elements.snapshotTitle = document.getElementById(`${ID}-snapshot-title`);
+        elements.snapshotSub = document.getElementById(`${ID}-snapshot-sub`);
+        elements.snapshotBody = document.getElementById(`${ID}-snapshot-body`);
+        elements.snapshotClose = document.getElementById(`${ID}-snapshot-close`);
+        elements.snapshotJump = document.getElementById(`${ID}-snapshot-jump`);
 
         clampToolBall();
         attachToolBallDrag();
@@ -2113,6 +2312,23 @@
         elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
         elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
         elements.clearFavorites.addEventListener('click', clearFavorites);
+        elements.snapshotClose.addEventListener('click', closeSnapshot);
+        elements.snapshotJump.addEventListener('click', () => {
+            const id = elements.snapshotJump.dataset.id || state.snapshotTargetId;
+            closeSnapshot();
+            jumpToMessageId(id, { highlight: false });
+        });
+        elements.snapshotBody.addEventListener('click', event => {
+            const actionElement = event.target.closest('[data-stcsj-action="jump-snapshot-message"]');
+            if (!actionElement || !elements.snapshotBody.contains(actionElement)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            const id = actionElement.dataset.id;
+            closeSnapshot();
+            jumpToMessageId(id, { highlight: false });
+        });
 
         [elements.searchTab, elements.favoriteTab].forEach(tab => {
             tab.addEventListener('click', () => {
@@ -2139,6 +2355,17 @@
                 toggleFavoriteFromResult(state.results[Number(actionElement.dataset.index)]);
                 return;
             }
+            if (action === 'snapshot-result') {
+                const result = state.results[Number(actionElement.dataset.index)];
+                if (result) {
+                    openSnapshotForMessage(result.id);
+                }
+                return;
+            }
+            if (action === 'snapshot-favorite') {
+                openSnapshotForMessage(actionElement.dataset.id);
+                return;
+            }
             if (action === 'jump-favorite') {
                 jumpToMessageId(actionElement.dataset.id, { highlight: false });
                 return;
@@ -2152,6 +2379,10 @@
         });
 
         document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && isSnapshotOpen()) {
+                closeSnapshot();
+                return;
+            }
             if (event.key === 'Escape' && state.toolsOpen) {
                 closeToolPanel();
                 return;
@@ -2201,6 +2432,8 @@
         elements.input.value = '';
         state.query = '';
         state.results = [];
+        state.messages = [];
+        closeSnapshot();
         state.activeIndex = -1;
         state.activeOccurrence = 0;
         state.mode = 'search';
