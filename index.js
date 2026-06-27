@@ -5,16 +5,15 @@
     const METADATA_KEY = 'chat_search_jump_favorites_v2';
     const ID = 'st-chat-search-jump';
     const CONNECTION_MANAGER_KEY = 'connectionManager';
-    const CONNECTION_PRESET_FIELD = 'preset';
     const API_ONLY_PROFILE_COMMANDS = Object.freeze(['api', 'api-url', 'model', 'proxy', 'secret-id']);
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
-    const SNAPSHOT_BEFORE_COUNT = 3;
-    const SNAPSHOT_AFTER_COUNT = 3;
-    const SNAPSHOT_TEXT_LIMIT = 2200;
     const API_GUARD_ENFORCE_MS = 2500;
     const PROFILE_LOCK_POLL_MS = 5000;
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
+    const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
+    const SNAPSHOT_RADIUS = 3;
+    const SNAPSHOT_TEXT_LIMIT = 2200;
 
     const DEFAULT_SETTINGS = Object.freeze({
         caseSensitive: false,
@@ -44,14 +43,17 @@
         currentProfile: '',
         searchToken: 0,
         jumpToken: 0,
-        snapshotToken: 0,
-        snapshotTargetId: null,
         apiSwitching: false,
         profileRestoreTimer: null,
         suppressProfileRestoreUntil: 0,
+        presetGuardActiveUntil: 0,
+        profileSyncTimer: null,
         openAiModulePromise: null,
+        coreModulePromise: null,
         nativePresetBindKnown: null,
         nativeModuleWarningShown: false,
+        snapshotToken: 0,
+        snapshotTargetId: null,
     };
 
     const elements = {};
@@ -88,6 +90,9 @@
                 settings[key] = value;
             }
         }
+
+        // “锁定当前连接”现在是隐藏默认行为：旧版保存成 false 的配置也会被拉回开启。
+        settings.lockApiProfile = true;
 
         return settings;
     }
@@ -247,14 +252,6 @@
         return parseJsonObject(await runSlashCommand(command));
     }
 
-    function hasProfilePreset(profile) {
-        return Boolean(profile && hasOwn(profile, CONNECTION_PRESET_FIELD) && profile[CONNECTION_PRESET_FIELD]);
-    }
-
-    function countPresetBoundProfiles() {
-        return getConnectionProfilesRaw().filter(hasProfilePreset).length;
-    }
-
     function describeApiOnlyProfile(profile) {
         if (!profile) {
             return '';
@@ -374,53 +371,6 @@
         }
     }
 
-    function stripPresetFromProfile(profile) {
-        if (!profile || typeof profile !== 'object') {
-            return false;
-        }
-
-        let changed = false;
-        if (hasOwn(profile, CONNECTION_PRESET_FIELD)) {
-            delete profile[CONNECTION_PRESET_FIELD];
-            changed = true;
-        }
-
-        if (!Array.isArray(profile.exclude)) {
-            profile.exclude = [];
-            changed = true;
-        }
-        if (!profile.exclude.includes(CONNECTION_PRESET_FIELD)) {
-            profile.exclude.push(CONNECTION_PRESET_FIELD);
-            changed = true;
-        }
-
-        return changed;
-    }
-
-    async function decouplePresetFromConnectionProfiles() {
-        const profiles = getConnectionProfilesRaw();
-        let changedCount = 0;
-
-        for (const profile of profiles) {
-            if (stripPresetFromProfile(profile)) {
-                changedCount += 1;
-            }
-        }
-
-        if (changedCount > 0) {
-            saveSettings();
-        }
-
-        globalThis.toastr?.success?.(
-            changedCount > 0
-                ? `已解绑 ${changedCount} 个连接配置里的 Settings Preset。之后用官方 Profile 下拉切换也不会顺手换预设。`
-                : '所有连接配置都已经不绑定 Settings Preset。',
-            'SillyTavern Tool Ball',
-        );
-
-        return changedCount;
-    }
-
     function escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, char => escapeMap[char]);
     }
@@ -430,10 +380,6 @@
             return globalThis.CSS.escape(String(value));
         }
         return String(value).replace(/["\\]/g, '\\$&');
-    }
-
-    function escapeRegExp(value) {
-        return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
     const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
@@ -630,18 +576,6 @@
         }
     }
 
-    async function setApiProfileLock(enabled) {
-        const settings = getSettings();
-        settings.lockApiProfile = Boolean(enabled);
-
-        if (enabled) {
-            await setLockedProfileToCurrent({ notify: true });
-        } else {
-            saveSettings();
-            globalThis.toastr?.info?.('已关闭连接配置锁定', 'SillyTavern Tool Ball');
-        }
-    }
-
     function suppressProfileRestore(durationMs = 1800) {
         state.suppressProfileRestoreUntil = Date.now() + durationMs;
     }
@@ -687,6 +621,39 @@
         globalThis.toastr?.info?.(`已保持 API 配置：${settings.lockedProfile}`, 'SillyTavern Tool Ball');
     }
 
+    async function syncLockedProfileToCurrent(reason = 'manual API changed') {
+        const settings = getSettings();
+        if (!settings.decouplePresetConnection || !settings.lockApiProfile || state.apiSwitching) {
+            return;
+        }
+
+        const current = await getCurrentProfile();
+        if (!current) {
+            return;
+        }
+
+        state.currentProfile = current;
+        if (settings.lockedProfile !== current) {
+            settings.lockedProfile = current;
+            saveSettings();
+            console.info(`[Chat Search Jump] Updated hidden API lock after ${reason}:`, current);
+        }
+        updateToolBallTitle();
+
+        if (state.toolsOpen) {
+            renderToolPanel();
+        }
+    }
+
+    function scheduleLockedProfileSync(reason = 'manual API changed') {
+        clearTimeout(state.profileSyncTimer);
+        state.profileSyncTimer = setTimeout(() => {
+            syncLockedProfileToCurrent(reason).catch(error => {
+                console.warn('[Chat Search Jump] Failed to update hidden API lock.', error);
+            });
+        }, 500);
+    }
+
     function scheduleLockedProfileRestore(reason = 'preset changed') {
         clearTimeout(state.profileRestoreTimer);
         state.profileRestoreTimer = setTimeout(() => {
@@ -701,6 +668,8 @@
         if (!settings.decouplePresetConnection || !eventData) {
             return;
         }
+
+        state.presetGuardActiveUntil = Date.now() + 5000;
 
         if (eventData.settings && hasOwn(eventData.settings, 'bind_preset_to_connection')) {
             eventData.settings.bind_preset_to_connection = false;
@@ -730,6 +699,7 @@
     }
 
     function handlePresetChangedForApiGuard() {
+        state.presetGuardActiveUntil = Date.now() + 4000;
         enforcePresetConnectionDecouple().catch(error => {
             console.warn('[Chat Search Jump] Failed to enforce preset/API decouple after preset change.', error);
         });
@@ -737,6 +707,19 @@
             return;
         }
         scheduleLockedProfileRestore('preset changed');
+    }
+
+    function handleMainApiChangedForApiGuard() {
+        if (state.apiSwitching) {
+            return;
+        }
+
+        if (Date.now() < state.presetGuardActiveUntil) {
+            scheduleLockedProfileRestore('API changed during preset change');
+            return;
+        }
+
+        scheduleLockedProfileSync('manual API changed');
     }
 
     function getApiGuardStatusHtml() {
@@ -929,6 +912,71 @@
         return plain.length > maxLength ? `${plain.slice(0, maxLength)}...` : plain;
     }
 
+    function escapeHtmlWithBreaks(value) {
+        return escapeHtml(value).split(String.fromCharCode(10)).join('<br>');
+    }
+
+    function normalizeSnapshotNewlines(text) {
+        const newline = String.fromCharCode(10);
+        const carriage = String.fromCharCode(13);
+        return String(text ?? '')
+            .split(carriage + newline).join(newline)
+            .split(carriage).join(newline);
+    }
+
+    function trimSnapshotText(text) {
+        const plain = normalizeSnapshotNewlines(stripHtml(text)).trim();
+        if (!plain) {
+            return { text: '', truncated: false };
+        }
+        if (plain.length <= SNAPSHOT_TEXT_LIMIT) {
+            return { text: plain, truncated: false };
+        }
+        return { text: `${plain.slice(0, SNAPSHOT_TEXT_LIMIT).trimEnd()}...`, truncated: true };
+    }
+
+    function highlightSnapshotText(text, query = state.query, caseSensitive = getSettings().caseSensitive) {
+        const snapshot = trimSnapshotText(text);
+        if (!snapshot.text) {
+            return '<em>空消息</em>';
+        }
+
+        const needleSource = String(query ?? '').trim();
+        if (!needleSource) {
+            return escapeHtmlWithBreaks(snapshot.text);
+        }
+
+        const haystack = caseSensitive ? snapshot.text : snapshot.text.toLocaleLowerCase();
+        const needle = caseSensitive ? needleSource : needleSource.toLocaleLowerCase();
+        const pieces = [];
+        let cursor = 0;
+        let index = haystack.indexOf(needle);
+
+        while (index >= 0) {
+            pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(cursor, index)));
+            pieces.push('<mark>');
+            pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(index, index + needleSource.length)));
+            pieces.push('</mark>');
+            cursor = index + needleSource.length;
+            index = haystack.indexOf(needle, cursor);
+        }
+
+        pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(cursor)));
+        if (snapshot.truncated) {
+            pieces.push('<div class="stcsj-snapshot-truncated">内容较长，快照中已截断。点“跳这层”可回到完整原文。</div>');
+        }
+        return pieces.join('');
+    }
+
+    function messageIdEquals(left, right) {
+        const leftNumber = Number(left);
+        const rightNumber = Number(right);
+        if (Number.isInteger(leftNumber) && Number.isInteger(rightNumber)) {
+            return leftNumber === rightNumber;
+        }
+        return String(left) === String(right);
+    }
+
     function countOccurrences(text, query, caseSensitive) {
         const plain = normalize(text, caseSensitive);
         const needle = caseSensitive ? query : query.toLocaleLowerCase();
@@ -969,7 +1017,6 @@
         }
 
         state.messages = messages;
-
         const needle = normalize(query, settings.caseSensitive);
         const results = [];
 
@@ -1179,7 +1226,7 @@
         elements.list.innerHTML = state.results.map((result, index) => {
             const favorite = isFavorite(result.id);
             const active = index === state.activeIndex ? ' active' : '';
-            const hidden = result.hidden ? '<span class="stcsj-badge">hidden</span>' : '';
+            const hidden = result.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
             return `
                 <div class="stcsj-result-row">
                     <button type="button" class="stcsj-result${active}" data-stcsj-action="jump-result" data-index="${index}" title="跳转到第 ${escapeHtml(result.id)} 楼">
@@ -1191,14 +1238,12 @@
                         </span>
                         <span class="stcsj-result-snippet">${result.snippet}</span>
                     </button>
-                    <div class="stcsj-result-side">
-                        <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-result" data-index="${index}" title="查看前后快照" aria-label="查看前后快照">
-                            <i class="fa-solid fa-book-open"></i><span>快照</span>
-                        </button>
-                        <button type="button" class="stcsj-icon-btn stcsj-result-fav${favorite ? ' active' : ''}" data-stcsj-action="toggle-favorite" data-index="${index}" title="${favorite ? '取消收藏' : '收藏这层'}" aria-label="${favorite ? '取消收藏' : '收藏这层'}">
-                            <i class="${favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
-                        </button>
-                    </div>
+                    <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-result" data-index="${index}" title="查看前后快照" aria-label="查看前后快照">
+                        <i class="fa-solid fa-eye"></i><span>前后</span>
+                    </button>
+                    <button type="button" class="stcsj-icon-btn stcsj-result-fav${favorite ? ' active' : ''}" data-stcsj-action="toggle-favorite" data-index="${index}" title="${favorite ? '取消收藏' : '收藏这层'}" aria-label="${favorite ? '取消收藏' : '收藏这层'}">
+                        <i class="${favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
+                    </button>
                 </div>`;
         }).join('');
     }
@@ -1220,7 +1265,7 @@
         }
 
         elements.list.innerHTML = favorites.map(favorite => {
-            const hidden = favorite.hidden ? '<span class="stcsj-badge">hidden</span>' : '';
+            const hidden = favorite.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
             const date = favorite.createdAt ? new Date(favorite.createdAt).toLocaleString() : '';
             return `
                 <div class="stcsj-result-row">
@@ -1233,171 +1278,14 @@
                         </span>
                         <span class="stcsj-result-snippet">${escapeHtml(favorite.preview || `第 ${favorite.id} 楼`)}</span>
                     </button>
-                    <div class="stcsj-result-side">
-                        <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-favorite" data-id="${escapeHtml(favorite.id)}" title="查看前后快照" aria-label="查看前后快照">
-                            <i class="fa-solid fa-book-open"></i><span>快照</span>
-                        </button>
-                        <button type="button" class="stcsj-icon-btn stcsj-result-fav active" data-stcsj-action="remove-favorite" data-id="${escapeHtml(favorite.id)}" title="取消收藏" aria-label="取消收藏">
-                            <i class="fa-solid fa-star"></i>
-                        </button>
-                    </div>
+                    <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-favorite" data-id="${escapeHtml(favorite.id)}" title="查看前后快照" aria-label="查看前后快照">
+                        <i class="fa-solid fa-eye"></i><span>前后</span>
+                    </button>
+                    <button type="button" class="stcsj-icon-btn stcsj-result-fav active" data-stcsj-action="remove-favorite" data-id="${escapeHtml(favorite.id)}" title="取消收藏" aria-label="取消收藏">
+                        <i class="fa-solid fa-star"></i>
+                    </button>
                 </div>`;
         }).join('');
-    }
-
-    function normalizeSnapshotText(text) {
-        const plain = stripHtml(text)
-            .replace(/\r\n/g, '\n')
-            .replace(/[ \t]+\n/g, '\n')
-            .replace(/\n{3,}/g, '\n\n')
-            .trim();
-        if (plain.length <= SNAPSHOT_TEXT_LIMIT) {
-            return { text: plain, truncated: false };
-        }
-        return { text: plain.slice(0, SNAPSHOT_TEXT_LIMIT), truncated: true };
-    }
-
-    function highlightSnapshotText(text, query = state.query) {
-        const normalized = normalizeSnapshotText(text);
-        const plain = normalized.text;
-        if (!plain) {
-            return '<em>空消息</em>';
-        }
-
-        const needle = String(query || '').trim();
-        if (!needle) {
-            return `${escapeHtml(plain).replace(/\n/g, '<br>')}${normalized.truncated ? '<div class="stcsj-snapshot-truncated">内容较长，已截断显示；跳转到楼层可看全文。</div>' : ''}`;
-        }
-
-        let regex;
-        try {
-            regex = new RegExp(escapeRegExp(needle), getSettings().caseSensitive ? 'g' : 'gi');
-        } catch {
-            return escapeHtml(plain).replace(/\n/g, '<br>');
-        }
-
-        let output = '';
-        let lastIndex = 0;
-        let match = regex.exec(plain);
-        while (match) {
-            output += escapeHtml(plain.slice(lastIndex, match.index));
-            output += `<mark>${escapeHtml(match[0])}</mark>`;
-            lastIndex = match.index + match[0].length;
-            if (regex.lastIndex === match.index) {
-                regex.lastIndex += 1;
-            }
-            match = regex.exec(plain);
-        }
-        output += escapeHtml(plain.slice(lastIndex));
-        output = output.replace(/\n/g, '<br>');
-        if (normalized.truncated) {
-            output += '<div class="stcsj-snapshot-truncated">内容较长，已截断显示；跳转到楼层可看全文。</div>';
-        }
-        return output;
-    }
-
-    function findMessageIndexById(messages, messageId) {
-        const textId = String(messageId ?? '');
-        const numericId = toFiniteInteger(messageId, null);
-        return messages.findIndex(message => String(message.id) === textId || (numericId !== null && message.id === numericId));
-    }
-
-    function getCachedMessages() {
-        const chat = getContext()?.chat;
-        if (Array.isArray(chat)) {
-            return chat.map(mapContextMessage).filter(message => Number.isInteger(message.id));
-        }
-        return Array.isArray(state.messages) ? state.messages : [];
-    }
-
-    function renderSnapshotEntries(messages, targetIndex) {
-        const start = Math.max(0, targetIndex - SNAPSHOT_BEFORE_COUNT);
-        const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_AFTER_COUNT);
-        const targetId = messages[targetIndex]?.id;
-        const entries = messages.slice(start, end + 1);
-
-        return entries.map((message, offset) => {
-            const absoluteIndex = start + offset;
-            const diff = absoluteIndex - targetIndex;
-            const isTarget = String(message.id) === String(targetId);
-            const hidden = message.hidden ? '<span class="stcsj-badge">hidden</span>' : '';
-            const diffLabel = diff === 0 ? '命中楼层' : (diff < 0 ? `前 ${Math.abs(diff)} 楼` : `后 ${diff} 楼`);
-            return `
-                <article class="stcsj-snapshot-message${isTarget ? ' target' : ''}">
-                    <div class="stcsj-snapshot-message-meta">
-                        <span>${escapeHtml(diffLabel)}</span>
-                        <span>#${escapeHtml(message.id)}</span>
-                        <strong>${escapeHtml(message.name || roleLabel(message.role))}</strong>
-                        ${hidden}
-                        <button type="button" class="stcsj-text-btn stcsj-snapshot-jump-small" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(message.id)}">跳到这层</button>
-                    </div>
-                    <div class="stcsj-snapshot-text">${highlightSnapshotText(message.text)}</div>
-                </article>`;
-        }).join('');
-    }
-
-    async function openSnapshotForMessage(messageId) {
-        const token = ++state.snapshotToken;
-        state.snapshotTargetId = messageId;
-        if (!elements.snapshot || !elements.snapshotBody) {
-            return;
-        }
-
-        elements.snapshot.hidden = false;
-        elements.snapshotTitle.textContent = `第 ${messageId} 楼前后快照`;
-        elements.snapshotSub.textContent = '正在读取当前聊天上下文...';
-        elements.snapshotJump.dataset.id = String(messageId);
-        elements.snapshotBody.innerHTML = '<div class="stcsj-empty">加载中...</div>';
-
-        try {
-            let messages = getCachedMessages();
-            if (!messages.length || findMessageIndexById(messages, messageId) < 0) {
-                messages = await readMessages();
-                state.messages = messages;
-            }
-            if (token !== state.snapshotToken) {
-                return;
-            }
-
-            const targetIndex = findMessageIndexById(messages, messageId);
-            if (targetIndex < 0) {
-                elements.snapshotSub.textContent = '当前聊天数据里没有找到这层。';
-                elements.snapshotBody.innerHTML = `
-                    <div class="stcsj-empty stcsj-snapshot-missing">
-                        <div>没有读到第 ${escapeHtml(messageId)} 楼的前后文。</div>
-                        <div class="stcsj-snapshot-position">可以先点下面按钮尝试跳转；如果是旧楼层，会自动加载旧消息。</div>
-                        <button type="button" class="stcsj-text-btn" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(messageId)}"><i class="fa-solid fa-location-arrow"></i>尝试跳到这层</button>
-                    </div>`;
-                return;
-            }
-
-            const target = messages[targetIndex];
-            const start = Math.max(0, targetIndex - SNAPSHOT_BEFORE_COUNT);
-            const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_AFTER_COUNT);
-            elements.snapshotTitle.textContent = `第 ${target.id} 楼前后快照`;
-            elements.snapshotSub.textContent = `显示 #${messages[start].id} - #${messages[end].id}，共 ${end - start + 1} 条。`;
-            elements.snapshotJump.dataset.id = String(target.id);
-            elements.snapshotBody.innerHTML = renderSnapshotEntries(messages, targetIndex);
-            requestAnimationFrame(() => {
-                elements.snapshotBody.querySelector('.stcsj-snapshot-message.target')?.scrollIntoView({ block: 'center' });
-            });
-        } catch (error) {
-            console.error('[Chat Search Jump] Failed to render snapshot.', error);
-            elements.snapshotSub.textContent = '读取失败';
-            elements.snapshotBody.innerHTML = '<div class="stcsj-empty">打开前后快照失败。请刷新页面后再试。</div>';
-        }
-    }
-
-    function closeSnapshot() {
-        if (!elements.snapshot) {
-            return;
-        }
-        elements.snapshot.hidden = true;
-        state.snapshotTargetId = null;
-    }
-
-    function isSnapshotOpen() {
-        return Boolean(elements.snapshot && !elements.snapshot.hidden);
     }
 
     function updateFavoriteCount() {
@@ -1427,6 +1315,106 @@
         } else {
             renderSearchList();
         }
+    }
+
+    function getCachedMessages() {
+        const chat = getContext()?.chat;
+        if (Array.isArray(chat)) {
+            return chat.map(mapContextMessage).filter(message => Number.isInteger(message.id));
+        }
+        return Array.isArray(state.messages) ? state.messages : [];
+    }
+
+    function findMessageIndexById(messages, messageId) {
+        return messages.findIndex(message => messageIdEquals(message.id, messageId));
+    }
+
+    function findCachedMessageById(messageId) {
+        return getCachedMessages().find(message => messageIdEquals(message.id, messageId)) || null;
+    }
+
+    function renderSnapshotMessages(messages, targetIndex) {
+        const start = Math.max(0, targetIndex - SNAPSHOT_RADIUS);
+        const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_RADIUS);
+        const targetId = messages[targetIndex]?.id;
+        const query = state.query || findFavorite(targetId)?.query || '';
+
+        return messages.slice(start, end + 1).map(message => {
+            const isTarget = messageIdEquals(message.id, targetId);
+            const hidden = message.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
+            return `
+                <article class="stcsj-snapshot-message${isTarget ? ' target' : ''}">
+                    <div class="stcsj-snapshot-meta">
+                        <span>#${escapeHtml(message.id)}</span>
+                        <strong>${escapeHtml(message.name || roleLabel(message.role))}</strong>
+                        ${hidden}
+                        ${isTarget ? '<span class="stcsj-badge stcsj-badge-target">命中楼层</span>' : ''}
+                        <button type="button" class="stcsj-text-btn stcsj-snapshot-jump-one" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(message.id)}">跳这层</button>
+                    </div>
+                    <div class="stcsj-snapshot-text">${highlightSnapshotText(message.text, query)}</div>
+                </article>`;
+        }).join('');
+    }
+
+    async function openSnapshotForMessage(messageId) {
+        const token = ++state.snapshotToken;
+        state.snapshotTargetId = messageId;
+        if (!elements.snapshot || !elements.snapshotList) {
+            return;
+        }
+
+        elements.snapshot.hidden = false;
+        elements.snapshot.classList.add('open');
+        elements.snapshotTitle.textContent = `第 ${messageId} 楼前后快照`;
+        elements.snapshotSub.textContent = '正在读取当前聊天上下文...';
+        elements.snapshotJump.dataset.id = String(messageId);
+        elements.snapshotList.innerHTML = '<div class="stcsj-empty">加载中...</div>';
+
+        try {
+            let messages = getCachedMessages();
+            if (!messages.length || findMessageIndexById(messages, messageId) < 0) {
+                messages = await readMessages();
+                state.messages = messages;
+            }
+            if (token !== state.snapshotToken) {
+                return;
+            }
+
+            const targetIndex = findMessageIndexById(messages, messageId);
+            if (targetIndex < 0) {
+                elements.snapshotSub.textContent = '没有在当前聊天数据里找到这层。';
+                elements.snapshotList.innerHTML = '<div class="stcsj-empty">找不到这条消息。可以先点搜索结果跳转，等旧楼层加载出来后再打开快照。</div>';
+                return;
+            }
+
+            const target = messages[targetIndex];
+            const start = Math.max(0, targetIndex - SNAPSHOT_RADIUS);
+            const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_RADIUS);
+            elements.snapshotTitle.textContent = `第 ${target.id} 楼前后快照`;
+            elements.snapshotSub.textContent = `显示 #${messages[start].id} - #${messages[end].id}，共 ${end - start + 1} 条。`;
+            elements.snapshotJump.dataset.id = String(target.id);
+            elements.snapshotList.innerHTML = renderSnapshotMessages(messages, targetIndex);
+            requestAnimationFrame(() => {
+                elements.snapshotList.querySelector('.stcsj-snapshot-message.target')?.scrollIntoView({ block: 'center' });
+            });
+        } catch (error) {
+            console.error('[Chat Search Jump] Failed to render snapshot.', error);
+            elements.snapshotSub.textContent = '读取失败';
+            elements.snapshotList.innerHTML = '<div class="stcsj-empty">打开前后快照失败。请刷新页面后再试。</div>';
+        }
+    }
+
+    function closeSnapshot() {
+        if (!elements.snapshot) {
+            return;
+        }
+        elements.snapshot.classList.remove('open');
+        elements.snapshot.hidden = true;
+        state.snapshotTargetId = null;
+    }
+
+    function isSnapshotOpen() {
+        return Boolean(elements.snapshot && !elements.snapshot.hidden && elements.snapshot.classList.contains('open'));
     }
 
     function renderToolPanelLoading() {
@@ -1463,9 +1451,8 @@
 
         const settings = getSettings();
         applyOfficialPresetConnectionDecouple();
-        const presetBoundCount = countPresetBoundProfiles();
+        await seedLockedProfileIfNeeded();
         const presetDecoupleChecked = checkedAttribute(settings.decouplePresetConnection);
-        const profileLockChecked = checkedAttribute(settings.lockApiProfile);
         const apiOnlyChecked = checkedAttribute(settings.apiOnlySwitching);
         const apiModeText = settings.apiOnlySwitching ? 'API-only：不改预设' : '完整 Profile：会按配置切预设';
         const guardStatusHtml = getApiGuardStatusHtml();
@@ -1488,24 +1475,17 @@
             <div class="stcsj-tool-section-title">API 配置</div>
             <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(current || '未知')}</strong></div>
             <div class="stcsj-api-guard">
-                <label class="stcsj-tool-toggle" title="开启后，扩展会关闭 SillyTavern 的预设/API 绑定，并在切预设后恢复当前连接。">
+                <label class="stcsj-tool-toggle" title="开启后，扩展会关闭 SillyTavern 的预设/API 绑定；当前 API 连接会在后台自动保护，不再显示单独锁定开关。">
                     <input type="checkbox" id="${ID}-preset-decouple"${presetDecoupleChecked}>
-                    <span><strong>预设不改 API</strong><small>自动关闭官方绑定，旧版用锁定兜底</small></span>
-                </label>
-                <label class="stcsj-tool-toggle" title="切换 Settings Preset 后，如果 API 被带跑，会恢复到锁定的 Connection Profile。">
-                    <input type="checkbox" id="${ID}-profile-lock"${profileLockChecked}>
-                    <span><strong>锁定当前连接</strong><small>切预设后保持这个 API / 模型</small></span>
+                    <span><strong>预设不改 API</strong><small>当前 API / 模型会自动守住</small></span>
                 </label>
                 <div class="stcsj-api-status">${guardStatusHtml}</div>
-                <button type="button" class="stcsj-tool-action stcsj-tool-action-compact" id="${ID}-lock-current-profile"><i class="fa-solid fa-thumbtack"></i><span>把当前 API 设为锁定</span></button>
-                <button type="button" class="stcsj-tool-action stcsj-tool-action-compact" id="${ID}-unlock-profile"${settings.lockedProfile ? '' : ' disabled'}><i class="fa-solid fa-lock-open"></i><span>解除 API 锁定</span></button>
             </div>
             <label class="stcsj-tool-toggle" title="开启后，点下面 Profile 只应用 API / URL / 模型 / 密钥，不应用 Settings Preset。">
                 <input type="checkbox" id="${ID}-api-only-switch"${apiOnlyChecked}>
                 <span><strong>${escapeHtml(apiModeText)}</strong><small>悬浮球切 Profile 时不顺手换预设</small></span>
             </label>
-            <button type="button" class="stcsj-tool-action" id="${ID}-decouple-profiles"><i class="fa-solid fa-link-slash"></i><span>解绑已有 Profile 的预设</span><strong class="stcsj-tool-count stcsj-profile-preset-count">${presetBoundCount}</strong></button>
-            <div class="stcsj-tool-note">上面两个开关管“切预设别改 API”；API-only 管“点 Profile 别改预设”。</div>
+            <div class="stcsj-tool-note">当前 API 会在后台自动保护；点下面 Profile 默认只切 API / 模型，不改当前预设。</div>
             <div class="stcsj-profile-list">${profileHtml}</div>
             <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
 
@@ -1523,33 +1503,11 @@
             await setPresetConnectionDecouple(Boolean(event.currentTarget.checked));
             await renderToolPanel();
         });
-        elements.toolPanel.querySelector(`#${ID}-profile-lock`)?.addEventListener('change', async event => {
-            await setApiProfileLock(Boolean(event.currentTarget.checked));
-            await renderToolPanel();
-        });
-        elements.toolPanel.querySelector(`#${ID}-lock-current-profile`)?.addEventListener('click', async () => {
-            await setLockedProfileToCurrent({ notify: true });
-            await enforcePresetConnectionDecouple({ notify: false });
-            await renderToolPanel();
-        });
-        elements.toolPanel.querySelector(`#${ID}-unlock-profile`)?.addEventListener('click', async () => {
-            const settings = getSettings();
-            settings.lockedProfile = '';
-            settings.lockApiProfile = false;
-            saveSettings();
-            updateToolBallTitle();
-            globalThis.toastr?.info?.('已解除 API 配置锁定', 'SillyTavern Tool Ball');
-            await renderToolPanel();
-        });
         elements.toolPanel.querySelector(`#${ID}-api-only-switch`)?.addEventListener('change', event => {
             const settings = getSettings();
             settings.apiOnlySwitching = Boolean(event.currentTarget.checked);
             saveSettings();
             renderToolPanel();
-        });
-        elements.toolPanel.querySelector(`#${ID}-decouple-profiles`)?.addEventListener('click', async () => {
-            await decouplePresetFromConnectionProfiles();
-            await renderToolPanel();
         });
         elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
@@ -1650,19 +1608,43 @@
     }
 
     function getShowMoreButton() {
-        const host = document.getElementById('show_more_messages');
-        if (!host) {
-            return null;
+        const candidates = [
+            document.getElementById('show_more_messages'),
+            document.querySelector('#show_more_messages button, #show_more_messages [role="button"], #show_more_messages .menu_button, #show_more_messages .right_menu_button'),
+            document.querySelector('.show_more_messages, [data-testid="show_more_messages"], [data-action="show_more_messages"]'),
+        ].filter(Boolean);
+
+        for (const host of candidates) {
+            const nested = host.matches('button, [role="button"], .menu_button, .right_menu_button')
+                ? host
+                : host.querySelector('button, [role="button"], .menu_button, .right_menu_button, i, svg');
+
+            if (isProbablyClickable(nested)) {
+                return nested;
+            }
+            if (isProbablyClickable(host)) {
+                return host;
+            }
+        }
+        return null;
+    }
+
+    function emitPointerClick(element) {
+        if (!element) {
+            return false;
         }
 
-        const nested = host.matches('button, [role="button"]')
-            ? host
-            : host.querySelector('button, [role="button"], .menu_button, .right_menu_button');
-
-        if (isProbablyClickable(nested)) {
-            return nested;
+        const eventOptions = { bubbles: true, cancelable: true, view: window };
+        try {
+            element.dispatchEvent(new MouseEvent('pointerdown', eventOptions));
+            element.dispatchEvent(new MouseEvent('mousedown', eventOptions));
+            element.dispatchEvent(new MouseEvent('mouseup', eventOptions));
+            element.dispatchEvent(new MouseEvent('click', eventOptions));
+            return true;
+        } catch (error) {
+            console.warn('[Chat Search Jump] Failed to dispatch pointer click.', error);
+            return false;
         }
-        return isProbablyClickable(host) ? host : null;
     }
 
     function clickShowMore(button) {
@@ -1670,22 +1652,112 @@
             return false;
         }
 
+        let clicked = false;
         try {
             if (typeof globalThis.$ === 'function') {
                 globalThis.$(button).trigger('click');
-            } else {
-                button.click();
+                clicked = true;
             }
-            return true;
         } catch (error) {
+            console.warn('[Chat Search Jump] jQuery click on #show_more_messages failed.', error);
+        }
+
+        try {
+            button.click?.();
+            clicked = true;
+        } catch (error) {
+            console.warn('[Chat Search Jump] Native click on #show_more_messages failed.', error);
+        }
+
+        return emitPointerClick(button) || clicked;
+    }
+
+    function scrollChatToTop() {
+        const container = getChatContainer();
+        try {
+            if (container && container !== document.body) {
+                container.scrollTop = 0;
+                container.dispatchEvent(new Event('scroll', { bubbles: true }));
+            }
+            window.scrollTo({ top: 0, behavior: 'auto' });
+        } catch {
             try {
-                button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-                return true;
-            } catch (innerError) {
-                console.warn('[Chat Search Jump] Failed to click #show_more_messages.', error, innerError);
-                return false;
+                window.scrollTo(0, 0);
+            } catch {
+                // Ignore scroll failures.
             }
         }
+    }
+
+    async function importCoreModule() {
+        if (state.coreModulePromise) {
+            return state.coreModulePromise;
+        }
+
+        state.coreModulePromise = (async () => {
+            for (const modulePath of CORE_MODULE_PATHS) {
+                try {
+                    return await import(modulePath);
+                } catch {
+                    // Try the next path. Different ST deployments can use different base URLs.
+                }
+            }
+            return null;
+        })();
+
+        return state.coreModulePromise;
+    }
+
+    async function callCoreShowMoreMessages() {
+        const context = getContext();
+        const localCandidates = [
+            globalThis.showMoreMessages,
+            globalThis.loadMoreMessages,
+            globalThis.loadOlderMessages,
+            context?.showMoreMessages,
+            context?.loadMoreMessages,
+            context?.loadOlderMessages,
+        ];
+
+        for (const candidate of localCandidates) {
+            if (typeof candidate !== 'function') {
+                continue;
+            }
+            try {
+                await candidate.call(context || globalThis);
+                return true;
+            } catch (error) {
+                console.warn('[Chat Search Jump] Core show-more function failed.', error);
+            }
+        }
+
+        const module = await importCoreModule();
+        const moduleCandidates = [module?.showMoreMessages, module?.loadMoreMessages, module?.loadOlderMessages];
+        for (const candidate of moduleCandidates) {
+            if (typeof candidate !== 'function') {
+                continue;
+            }
+            try {
+                await candidate();
+                return true;
+            } catch (error) {
+                console.warn('[Chat Search Jump] Imported show-more function failed.', error);
+            }
+        }
+
+        return false;
+    }
+
+    async function triggerLoadOlderMessages() {
+        scrollChatToTop();
+        await wait(30);
+
+        const button = getShowMoreButton();
+        if (button && clickShowMore(button)) {
+            return true;
+        }
+
+        return callCoreShowMoreMessages();
     }
 
     function getChatContainer() {
@@ -1743,24 +1815,28 @@
 
         let lastFirstId = null;
         let stagnantLoads = 0;
-        let noButtonWaits = 0;
+        let noLoaderWaits = 0;
 
         for (let attempt = 0; attempt < MAX_AUTO_LOAD_ATTEMPTS; attempt += 1) {
             const firstRenderedId = getFirstRenderedMessageId();
             const targetIsOlder = firstRenderedId === null || Number(messageId) < firstRenderedId;
 
             if (!targetIsOlder) {
-                element = await waitForMessageElement(messageId, 300);
+                element = await waitForMessageElement(messageId, 450);
                 if (element) {
                     return element;
                 }
+
+                // The requested id falls inside the already-rendered range but no .mes exists.
+                // That usually means it is a hidden/system/deleted message, so loading older messages will not help.
                 break;
             }
 
-            const showMore = getShowMoreButton();
-            if (!showMore) {
-                if (noButtonWaits < 6) {
-                    noButtonWaits += 1;
+            onProgress?.(attempt + 1, firstRenderedId);
+            const loaded = await triggerLoadOlderMessages();
+            if (!loaded) {
+                if (noLoaderWaits < 6) {
+                    noLoaderWaits += 1;
                     await wait(500);
                     element = findMessageElement(messageId);
                     if (element) {
@@ -1771,18 +1847,13 @@
                 break;
             }
 
-            noButtonWaits = 0;
-            onProgress?.(attempt + 1, firstRenderedId);
-            if (!clickShowMore(showMore)) {
-                break;
-            }
-
-            element = await waitForMessageElement(messageId, 1100);
+            noLoaderWaits = 0;
+            element = await waitForMessageElement(messageId, 1200);
             if (element) {
                 return element;
             }
 
-            await wait(120);
+            await wait(150);
             const nextFirstId = getFirstRenderedMessageId();
             if (nextFirstId === lastFirstId) {
                 stagnantLoads += 1;
@@ -1952,7 +2023,16 @@
 
         if (!element) {
             renderPanelList();
-            globalThis.toastr?.warning?.(`找不到第 ${numericId} 楼。可能消息被隐藏、删除，或旧楼层加载按钮不可用。`, 'Chat Search Jump');
+            const cachedMessage = findCachedMessageById(numericId);
+            if (cachedMessage) {
+                await openSnapshotForMessage(numericId);
+                const reason = cachedMessage.hidden
+                    ? '这条是隐藏/系统消息，SillyTavern 不会把它渲染成可滚动楼层。'
+                    : '这条消息在聊天数据里，但当前页面没有渲染它。';
+                globalThis.toastr?.info?.(`第 ${numericId} 楼暂时不能跳转，已打开前后快照。${reason}`, 'Chat Search Jump');
+            } else {
+                globalThis.toastr?.warning?.(`找不到第 ${numericId} 楼。可能消息被删除，或旧楼层加载按钮不可用。`, 'Chat Search Jump');
+            }
             return;
         }
 
@@ -1968,11 +2048,22 @@
         renderPanelList();
     }
 
-    function jumpToResult(index, occurrenceIndex = 0) {
+    async function jumpToResult(index, occurrenceIndex = 0) {
         const result = state.results[index];
         if (!result) {
             return;
         }
+
+        if (result.hidden) {
+            state.activeIndex = index;
+            state.activeOccurrence = occurrenceIndex;
+            state.mode = 'search';
+            renderPanelList();
+            await openSnapshotForMessage(result.id);
+            globalThis.toastr?.info?.(`第 ${result.id} 楼是隐藏/系统消息，不能滚动定位，已打开前后快照。`, 'Chat Search Jump');
+            return;
+        }
+
         jumpToMessageId(result.id, { resultIndex: index, occurrenceIndex, highlight: true });
     }
 
@@ -1992,6 +2083,8 @@
 
         const element = await ensureMessageRendered(result.id);
         if (!element) {
+            await openSnapshotForMessage(result.id);
+            globalThis.toastr?.info?.(`第 ${result.id} 楼没有渲染，已打开前后快照。`, 'Chat Search Jump');
             return;
         }
 
@@ -2208,7 +2301,6 @@
         document.getElementById(`${ID}-toggle`)?.remove();
         document.getElementById(`${ID}-tool-panel`)?.remove();
         document.getElementById(`${ID}-panel`)?.remove();
-        document.getElementById(`${ID}-snapshot`)?.remove();
 
         document.body.insertAdjacentHTML('beforeend', `
             <button type="button" id="${ID}-toggle" class="stcsj-tool-ball" title="酒馆工具" aria-label="酒馆工具" aria-expanded="false">
@@ -2245,21 +2337,22 @@
                     <button type="button" class="stcsj-icon-btn" id="${ID}-hit-next" title="下一处命中" aria-label="下一处命中"><i class="fa-solid fa-arrow-right"></i></button>
                 </div>
                 <div class="stcsj-list" id="${ID}-list"><div class="stcsj-empty">搜索当前聊天记录</div></div>
-                <div id="${ID}-snapshot" class="stcsj-snapshot" hidden>
-                    <div class="stcsj-snapshot-header">
+            </section>
+            <div id="${ID}-snapshot" class="stcsj-snapshot-overlay" hidden>
+                <div class="stcsj-snapshot-card" role="dialog" aria-modal="true" aria-labelledby="${ID}-snapshot-title">
+                    <div class="stcsj-snapshot-card-header">
                         <div>
                             <strong id="${ID}-snapshot-title">前后快照</strong>
                             <small id="${ID}-snapshot-sub">查看命中楼层附近消息</small>
                         </div>
-                        <button type="button" class="stcsj-icon-btn" id="${ID}-snapshot-close" title="关闭快照" aria-label="关闭快照"><i class="fa-solid fa-xmark"></i></button>
+                        <div class="stcsj-snapshot-card-actions">
+                            <button type="button" class="stcsj-text-btn" id="${ID}-snapshot-jump">跳到命中楼层</button>
+                            <button type="button" class="stcsj-icon-btn" id="${ID}-snapshot-close" title="关闭快照" aria-label="关闭快照"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
                     </div>
-                    <div class="stcsj-snapshot-body" id="${ID}-snapshot-body"></div>
-                    <div class="stcsj-snapshot-footer">
-                        <span class="stcsj-snapshot-position">显示目标楼层前 3 楼 / 后 3 楼</span>
-                        <button type="button" class="stcsj-text-btn" id="${ID}-snapshot-jump"><i class="fa-solid fa-location-arrow"></i>跳到命中楼层</button>
-                    </div>
+                    <div class="stcsj-snapshot-list" id="${ID}-snapshot-list"></div>
                 </div>
-            </section>`);
+            </div>`);
 
         elements.toggle = document.getElementById(`${ID}-toggle`);
         elements.toolPanel = document.getElementById(`${ID}-tool-panel`);
@@ -2285,9 +2378,9 @@
         elements.snapshot = document.getElementById(`${ID}-snapshot`);
         elements.snapshotTitle = document.getElementById(`${ID}-snapshot-title`);
         elements.snapshotSub = document.getElementById(`${ID}-snapshot-sub`);
-        elements.snapshotBody = document.getElementById(`${ID}-snapshot-body`);
-        elements.snapshotClose = document.getElementById(`${ID}-snapshot-close`);
         elements.snapshotJump = document.getElementById(`${ID}-snapshot-jump`);
+        elements.snapshotClose = document.getElementById(`${ID}-snapshot-close`);
+        elements.snapshotList = document.getElementById(`${ID}-snapshot-list`);
 
         clampToolBall();
         attachToolBallDrag();
@@ -2301,6 +2394,7 @@
             openToolPanel();
         });
         elements.input.addEventListener('input', () => {
+            closeSnapshot();
             state.mode = 'search';
             scheduleSearch();
         });
@@ -2312,19 +2406,24 @@
         elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
         elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
         elements.clearFavorites.addEventListener('click', clearFavorites);
+
         elements.snapshotClose.addEventListener('click', closeSnapshot);
+        elements.snapshot.addEventListener('click', event => {
+            if (event.target === elements.snapshot) {
+                closeSnapshot();
+            }
+        });
         elements.snapshotJump.addEventListener('click', () => {
             const id = elements.snapshotJump.dataset.id || state.snapshotTargetId;
             closeSnapshot();
             jumpToMessageId(id, { highlight: false });
         });
-        elements.snapshotBody.addEventListener('click', event => {
+        elements.snapshotList.addEventListener('click', event => {
             const actionElement = event.target.closest('[data-stcsj-action="jump-snapshot-message"]');
-            if (!actionElement || !elements.snapshotBody.contains(actionElement)) {
+            if (!actionElement || !elements.snapshotList.contains(actionElement)) {
                 return;
             }
             event.preventDefault();
-            event.stopPropagation();
             const id = actionElement.dataset.id;
             closeSnapshot();
             jumpToMessageId(id, { highlight: false });
@@ -2332,6 +2431,7 @@
 
         [elements.searchTab, elements.favoriteTab].forEach(tab => {
             tab.addEventListener('click', () => {
+                closeSnapshot();
                 state.mode = tab.dataset.mode === 'favorites' ? 'favorites' : 'search';
                 renderPanelList();
             });
@@ -2433,11 +2533,11 @@
         state.query = '';
         state.results = [];
         state.messages = [];
-        closeSnapshot();
         state.activeIndex = -1;
         state.activeOccurrence = 0;
         state.mode = 'search';
         clearOccurrenceHighlight();
+        closeSnapshot();
         renderPanelList();
         updateToolPanelFavoriteCount();
     }
@@ -2469,7 +2569,7 @@
         on('OAI_PRESET_CHANGED_AFTER', handlePresetChangedForApiGuard);
         on('PRESET_CHANGED', handlePresetChangedForApiGuard);
         on('SETTINGS_UPDATED', () => enforcePresetConnectionDecouple({ notify: false }));
-        on('MAIN_API_CHANGED', handlePresetChangedForApiGuard);
+        on('MAIN_API_CHANGED', handleMainApiChangedForApiGuard);
         on('GENERATION_STARTED', () => restoreLockedProfileIfNeeded('generation started'));
     }
 
