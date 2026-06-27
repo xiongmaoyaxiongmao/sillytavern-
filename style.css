@@ -51,8 +51,15 @@
     z-index: 9998;
     display: none;
     width: 306px;
-    max-height: 460px;
-    overflow: hidden;
+    max-height: min(570px, calc(100vh - 24px));
+    max-height: min(570px, calc(100dvh - 24px));
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    scrollbar-gutter: stable;
     border: 1px solid var(--stcsj-border);
     border-radius: 8px;
     color: var(--SmartThemeBodyColor, #f4f4f4);
@@ -64,6 +71,10 @@
 .stcsj-tool-panel.open {
     display: flex;
     flex-direction: column;
+}
+
+.stcsj-tool-panel > * {
+    flex-shrink: 0;
 }
 
 .stcsj-tool-title,
@@ -171,7 +182,7 @@
 
 .stcsj-profile-list {
     overflow: auto;
-    max-height: 230px;
+    max-height: 170px;
     padding-bottom: 2px;
 }
 
@@ -537,6 +548,7 @@
     .stcsj-tool-panel {
         width: min(306px, calc(100vw - 16px));
         max-height: calc(100vh - 118px);
+        max-height: calc(100dvh - 118px);
     }
 
     .stcsj-panel {
@@ -554,3 +566,96 @@
         width: 36px;
     }
 }
+
+.stcsj-tool-note {
+    margin: 4px 12px 8px;
+    font-size: 12px;
+    line-height: 1.45;
+    opacity: 0.72;
+}
+
+.stcsj-tool-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    width: calc(100% - 12px);
+    margin: 6px;
+    padding: 9px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: var(--stcsj-softer);
+    cursor: pointer;
+}
+
+.stcsj-tool-toggle:hover {
+    border-color: var(--stcsj-accent);
+    background: rgba(122, 183, 255, 0.10);
+}
+
+.stcsj-tool-toggle input {
+    margin-top: 3px;
+    flex: 0 0 auto;
+}
+
+.stcsj-tool-toggle span {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+    white-space: normal;
+}
+
+.stcsj-tool-toggle strong {
+    font-size: 12px;
+    line-height: 1.25;
+}
+
+.stcsj-tool-toggle small {
+    font-size: 11px;
+    line-height: 1.35;
+    opacity: 0.72;
+}
+
+.stcsj-api-guard {
+    margin: 2px 6px 6px;
+    padding: 6px 0;
+    border: 1px solid rgba(122, 183, 255, 0.14);
+    border-radius: 8px;
+    background: rgba(122, 183, 255, 0.055);
+}
+
+.stcsj-api-status {
+    margin: 4px 6px 6px;
+    padding: 8px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.14);
+}
+
+.stcsj-api-status-line {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.stcsj-api-status-line span,
+.stcsj-api-status-line small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stcsj-api-status-line span {
+    color: var(--stcsj-accent);
+}
+
+.stcsj-api-status-line small {
+    opacity: 0.68;
+}
+
+.stcsj-tool-action-compact {
+    padding-top: 8px;
+    padding-bottom: 8px;
+}
+

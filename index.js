@@ -9,7 +9,9 @@
     const API_ONLY_PROFILE_COMMANDS = Object.freeze(['api', 'api-url', 'model', 'proxy', 'secret-id']);
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
-    const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
+    const API_GUARD_ENFORCE_MS = 2500;
+    const PROFILE_LOCK_POLL_MS = 5000;
+    const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
 
     const DEFAULT_SETTINGS = Object.freeze({
         caseSensitive: false,
@@ -26,7 +28,6 @@
 
     const fallbackSettings = { ...DEFAULT_SETTINGS };
     let fallbackFavoriteStore = null;
-    let openAiModulePromise = null;
 
     const state = {
         query: '',
@@ -37,12 +38,14 @@
         toolsOpen: false,
         mode: 'search',
         currentProfile: '',
-        currentPreset: '',
         searchToken: 0,
         jumpToken: 0,
         apiSwitching: false,
         profileRestoreTimer: null,
         suppressProfileRestoreUntil: 0,
+        openAiModulePromise: null,
+        nativePresetBindKnown: null,
+        nativeModuleWarningShown: false,
     };
 
     const elements = {};
@@ -167,54 +170,6 @@
 
     async function switchProfile(name) {
         await runSlashCommand(`/profile ${quoteSlashArg(name)}`);
-    }
-
-    async function getOpenAiModule() {
-        if (!openAiModulePromise) {
-            openAiModulePromise = import('/scripts/openai.js').catch(error => {
-                console.warn('[SillyTavern Tool Ball] Failed to import /scripts/openai.js.', error);
-                return null;
-            });
-        }
-        return openAiModulePromise;
-    }
-
-    function getChatCompletionSettings() {
-        const context = getContext();
-        return context?.chatCompletionSettings
-            ?? context?.oai_settings
-            ?? globalThis.oai_settings
-            ?? null;
-    }
-
-    async function getOpenAiSettings() {
-        const module = await getOpenAiModule();
-        return module?.oai_settings ?? getChatCompletionSettings();
-    }
-
-    function setLocalPresetConnectionBinding(bound) {
-        const next = Boolean(bound);
-        const localSettings = getChatCompletionSettings();
-
-        if (localSettings && hasOwn(localSettings, OFFICIAL_PRESET_CONNECTION_BIND_ID)) {
-            const changed = localSettings[OFFICIAL_PRESET_CONNECTION_BIND_ID] !== next;
-            localSettings[OFFICIAL_PRESET_CONNECTION_BIND_ID] = next;
-            return changed;
-        }
-
-        return false;
-    }
-
-    async function setOpenAiPresetConnectionBinding(bound) {
-        const next = Boolean(bound);
-        const oaiSettings = await getOpenAiSettings();
-        if (!oaiSettings || !hasOwn(oaiSettings, OFFICIAL_PRESET_CONNECTION_BIND_ID)) {
-            return false;
-        }
-
-        const changed = oaiSettings[OFFICIAL_PRESET_CONNECTION_BIND_ID] !== next;
-        oaiSettings[OFFICIAL_PRESET_CONNECTION_BIND_ID] = next;
-        return changed;
     }
 
     function clonePlainObject(value) {
@@ -357,14 +312,6 @@
         return (await runSlashCommand('/preset')).trim();
     }
 
-    async function restorePresetName(name) {
-        const preset = String(name ?? '').trim();
-        if (!preset) {
-            return;
-        }
-        await runSlashCommand(`/preset ${quoteSlashArg(preset)}`);
-    }
-
     async function applyProfileFieldsWithoutPreset(profile) {
         let appliedCount = 0;
         for (const command of API_ONLY_PROFILE_COMMANDS) {
@@ -379,33 +326,40 @@
     async function switchProfileApiOnly(name) {
         const profile = await getConnectionProfileDetails(name);
         const previousPreset = await getCurrentPresetName();
+        const official = applyOfficialPresetConnectionDecouple();
 
         state.apiSwitching = true;
         suppressProfileRestore(4000);
         try {
-            await ensurePresetConnectionDecoupled({ notify: false });
+            // Newer SillyTavern builds have the native “bind preset to connection” switch.
+            // With that disabled, the safest way to keep API keys/proxies intact is to load
+            // the full profile first, then restore the previous Settings Preset.
+            if (official.available && previousPreset) {
+                await switchProfile(name);
+                applyOfficialPresetConnectionDecouple();
+                await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
+                if (profile) {
+                    await markConnectionProfileSelected(profile);
+                }
+                return profile?.name || name;
+            }
 
+            // Older builds do not have the native toggle. In that case, apply the fields that
+            // affect the connection directly and deliberately skip the profile's preset field.
             if (profile) {
                 const appliedCount = await applyProfileFieldsWithoutPreset(profile);
                 if (appliedCount > 0) {
                     await markConnectionProfileSelected(profile);
-                    if (previousPreset) {
-                        state.currentPreset = previousPreset;
-                    }
                     return profile.name || name;
                 }
             }
 
-            // Fallback for unusual Connection Profiles without separate API fields.
-            // Full profile loading may touch the preset, so restore the user's previous preset immediately.
-            globalThis.toastr?.warning?.('没有找到可单独应用的 API 字段，已改用完整 Profile 切换并恢复原预设。', 'SillyTavern Tool Ball');
+            globalThis.toastr?.warning?.('没有找到可单独应用的 API 字段，已改用完整 Profile 切换。', 'SillyTavern Tool Ball');
             await switchProfile(name);
-            await ensurePresetConnectionDecoupled({ notify: false });
-            await restorePresetName(previousPreset);
-            if (profile) {
-                await markConnectionProfileSelected(profile);
+            if (official.available && previousPreset) {
+                applyOfficialPresetConnectionDecouple();
+                await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
             }
-            state.currentPreset = previousPreset || await getCurrentPresetName();
             return profile?.name || name;
         } finally {
             setTimeout(() => {
@@ -472,6 +426,8 @@
         return String(value).replace(/["\\]/g, '\\$&');
     }
 
+    const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
+
     function checkedAttribute(value) {
         return value ? ' checked' : '';
     }
@@ -490,7 +446,7 @@
             element.dispatchEvent(new Event('input', eventOptions));
             element.dispatchEvent(new Event('change', eventOptions));
         } catch (error) {
-            console.warn('[SillyTavern Tool Ball] Failed to emit native input/change events.', error);
+            console.warn('[Chat Search Jump] Failed to emit native input/change events.', error);
         }
 
         try {
@@ -498,126 +454,125 @@
                 globalThis.$(element).trigger('input').trigger('change');
             }
         } catch (error) {
-            console.warn('[SillyTavern Tool Ball] Failed to emit jQuery input/change events.', error);
+            console.warn('[Chat Search Jump] Failed to emit jQuery input/change events.', error);
         }
     }
 
-    function readPresetConnectionBindState() {
-        const checkbox = getPresetConnectionBindCheckbox();
-        if (checkbox) {
-            return { available: true, bound: Boolean(checkbox.checked), source: 'checkbox' };
+    async function getOpenAiModule() {
+        if (!state.openAiModulePromise) {
+            state.openAiModulePromise = (async () => {
+                let lastError = null;
+                for (const path of OPENAI_MODULE_PATHS) {
+                    try {
+                        const module = await import(path);
+                        if (module?.oai_settings) {
+                            return module;
+                        }
+                    } catch (error) {
+                        lastError = error;
+                    }
+                }
+                throw lastError || new Error('SillyTavern openai.js module not found.');
+            })();
         }
 
-        const localSettings = getChatCompletionSettings();
-        if (localSettings && hasOwn(localSettings, OFFICIAL_PRESET_CONNECTION_BIND_ID)) {
-            return { available: true, bound: Boolean(localSettings[OFFICIAL_PRESET_CONNECTION_BIND_ID]), source: 'settings' };
+        try {
+            return await state.openAiModulePromise;
+        } catch (error) {
+            state.openAiModulePromise = null;
+            if (!state.nativeModuleWarningShown) {
+                state.nativeModuleWarningShown = true;
+                console.warn('[Chat Search Jump] Failed to access SillyTavern openai.js. DOM/event guards will still run.', error);
+            }
+            return null;
         }
-
-        return { available: false, bound: null, source: 'none' };
     }
 
-    function syncPresetConnectionCheckbox(bound, triggerEvents = false) {
-        const checkbox = getPresetConnectionBindCheckbox();
-        if (!checkbox) {
-            return false;
+    async function setNativePresetConnectionBind(enabled) {
+        const module = await getOpenAiModule();
+        if (!module?.oai_settings || !hasOwn(module.oai_settings, 'bind_preset_to_connection')) {
+            return { available: false, changed: false };
         }
 
-        const next = Boolean(bound);
-        const changed = checkbox.checked !== next;
-        checkbox.checked = next;
-        checkbox.setAttribute('aria-checked', String(next));
-        if (triggerEvents && changed) {
-            emitInputAndChange(checkbox);
+        const desired = Boolean(enabled);
+        const changed = module.oai_settings.bind_preset_to_connection !== desired;
+        module.oai_settings.bind_preset_to_connection = desired;
+        state.nativePresetBindKnown = desired;
+        if (changed) {
+            saveSettings();
         }
-        return changed;
+        return { available: true, changed };
+    }
+
+    async function enforcePresetConnectionDecouple({ notify = false } = {}) {
+        const domResult = applyOfficialPresetConnectionDecouple({ notify: false });
+        const nativeResult = await setNativePresetConnectionBind(false);
+
+        if (notify && (domResult.changed || nativeResult.changed)) {
+            globalThis.toastr?.success?.('已关闭“预设绑定 API 连接”', 'SillyTavern Tool Ball');
+        }
+
+        return {
+            available: domResult.available || nativeResult.available,
+            changed: domResult.changed || nativeResult.changed,
+        };
     }
 
     function getOfficialPresetConnectionBindState() {
-        const stateInfo = readPresetConnectionBindState();
-        if (!stateInfo.available) {
+        const checkbox = getPresetConnectionBindCheckbox();
+        if (!checkbox) {
+            if (state.nativePresetBindKnown !== null) {
+                const bound = Boolean(state.nativePresetBindKnown);
+                return {
+                    available: true,
+                    bound,
+                    label: bound ? '官方绑定：仍开启' : '官方绑定：已关闭',
+                    detail: bound ? '扩展会自动关掉它' : '切预设不会改 API 连接',
+                };
+            }
             return {
                 available: false,
                 bound: null,
                 label: '官方绑定开关：未找到',
-                detail: '使用内部兜底保护',
+                detail: '会用事件拦截和 API 锁兜底',
             };
         }
 
+        const bound = Boolean(checkbox.checked);
+        state.nativePresetBindKnown = bound;
         return {
             available: true,
-            bound: stateInfo.bound,
-            label: stateInfo.bound ? '官方绑定：仍开启' : '官方绑定：已关闭',
-            detail: stateInfo.bound ? '扩展会自动关掉它' : '切预设不会改 API 连接',
+            bound,
+            label: bound ? '官方绑定：仍开启' : '官方绑定：已关闭',
+            detail: bound ? '扩展会自动关掉它' : '切预设不会改 API 连接',
         };
     }
 
-    function applyOfficialPresetConnectionDecouple({ notify = false, triggerUi = false } = {}) {
+    function applyOfficialPresetConnectionDecouple({ notify = false } = {}) {
         const settings = getSettings();
         if (!settings.decouplePresetConnection) {
-            return { available: readPresetConnectionBindState().available, changed: false };
+            return { available: Boolean(getPresetConnectionBindCheckbox()), changed: false };
         }
 
-        const before = readPresetConnectionBindState();
-        const changedLocal = setLocalPresetConnectionBinding(false);
-        const changedCheckbox = syncPresetConnectionCheckbox(false, triggerUi);
-        const changed = Boolean(changedLocal || changedCheckbox || before.bound === true);
-
-        if (changed) {
-            saveSettings();
+        const checkbox = getPresetConnectionBindCheckbox();
+        if (!checkbox) {
+            return { available: false, changed: false };
         }
 
-        if (notify && changed) {
+        if (!checkbox.checked) {
+            state.nativePresetBindKnown = false;
+            return { available: true, changed: false };
+        }
+
+        checkbox.checked = false;
+        state.nativePresetBindKnown = false;
+        emitInputAndChange(checkbox);
+
+        if (notify) {
             globalThis.toastr?.success?.('已关闭“预设绑定 API 连接”', 'SillyTavern Tool Ball');
         }
 
-        return { available: before.available || changedLocal || Boolean(getPresetConnectionBindCheckbox()), changed };
-    }
-
-    async function ensurePresetConnectionDecoupled({ notify = false, triggerUi = false } = {}) {
-        const local = applyOfficialPresetConnectionDecouple({ notify, triggerUi });
-        const settings = getSettings();
-        if (!settings.decouplePresetConnection) {
-            return local;
-        }
-
-        const changedOpenAi = await setOpenAiPresetConnectionBinding(false);
-        if (changedOpenAi) {
-            saveSettings();
-            if (notify && !local.changed) {
-                globalThis.toastr?.success?.('已关闭“预设绑定 API 连接”', 'SillyTavern Tool Ball');
-            }
-        }
-
-        return {
-            available: local.available || changedOpenAi,
-            changed: local.changed || changedOpenAi,
-        };
-    }
-
-    function stripConnectionFieldsFromPresetEvent(payload) {
-        const settings = getSettings();
-        if (!settings.decouplePresetConnection || !payload) {
-            return;
-        }
-
-        if (payload.settings && hasOwn(payload.settings, OFFICIAL_PRESET_CONNECTION_BIND_ID)) {
-            payload.settings[OFFICIAL_PRESET_CONNECTION_BIND_ID] = false;
-        }
-
-        const preset = payload.preset;
-        const settingsToUpdate = payload.settingsToUpdate;
-        if (preset && settingsToUpdate && typeof settingsToUpdate === 'object') {
-            for (const [presetKey, descriptor] of Object.entries(settingsToUpdate)) {
-                const isConnectionSetting = Array.isArray(descriptor)
-                    ? Boolean(descriptor[3])
-                    : Boolean(descriptor?.isConnection || descriptor?.connection);
-                if (isConnectionSetting && hasOwn(preset, presetKey)) {
-                    delete preset[presetKey];
-                }
-            }
-        }
-
-        applyOfficialPresetConnectionDecouple({ notify: false, triggerUi: false });
+        return { available: true, changed: true };
     }
 
     async function setLockedProfileToCurrent({ notify = false } = {}) {
@@ -657,7 +612,7 @@
         saveSettings();
 
         if (enabled) {
-            await ensurePresetConnectionDecoupled({ notify: true, triggerUi: true });
+            await enforcePresetConnectionDecouple({ notify: true });
             await seedLockedProfileIfNeeded();
             globalThis.toastr?.success?.('已开启：切换预设不改 API', 'SillyTavern Tool Ball');
         } else {
@@ -694,7 +649,7 @@
             return;
         }
 
-        applyOfficialPresetConnectionDecouple();
+        await enforcePresetConnectionDecouple();
 
         const current = await getCurrentProfile();
         if (!current) {
@@ -709,17 +664,9 @@
         }
 
         suppressProfileRestore();
-        const previousPreset = await getCurrentPresetName();
-        if (settings.apiOnlySwitching) {
-            await switchProfileApiOnly(settings.lockedProfile);
-        } else {
-            await switchProfile(settings.lockedProfile);
-            await restorePresetName(previousPreset);
-        }
-        await ensurePresetConnectionDecoupled({ notify: false });
+        await switchProfile(settings.lockedProfile);
         const restored = await getCurrentProfile();
         state.currentProfile = restored || settings.lockedProfile;
-        state.currentPreset = previousPreset || await getCurrentPresetName();
         updateToolBallTitle();
 
         if (state.toolsOpen) {
@@ -739,14 +686,42 @@
         }, 450);
     }
 
-    function handlePresetChangedForApiGuard() {
+    function stripConnectionFieldsFromPresetEvent(eventData) {
+        const settings = getSettings();
+        if (!settings.decouplePresetConnection || !eventData) {
+            return;
+        }
+
+        if (eventData.settings && hasOwn(eventData.settings, 'bind_preset_to_connection')) {
+            eventData.settings.bind_preset_to_connection = false;
+            state.nativePresetBindKnown = false;
+        }
+
+        const preset = eventData.preset;
+        const settingsToUpdate = eventData.settingsToUpdate;
+        if (preset && settingsToUpdate && typeof settingsToUpdate === 'object') {
+            for (const [presetKey, descriptor] of Object.entries(settingsToUpdate)) {
+                const settingName = Array.isArray(descriptor) ? descriptor[1] : '';
+                const isConnection = Array.isArray(descriptor) && Boolean(descriptor[3]);
+                if (!isConnection) {
+                    continue;
+                }
+                delete preset[presetKey];
+                if (settingName && settingName !== presetKey) {
+                    delete preset[settingName];
+                }
+            }
+        }
+
         applyOfficialPresetConnectionDecouple();
-        ensurePresetConnectionDecoupled({ notify: false }).catch(error => {
-            console.warn('[SillyTavern Tool Ball] Failed to keep preset/API decoupled.', error);
+        enforcePresetConnectionDecouple().catch(error => {
+            console.warn('[Chat Search Jump] Failed to enforce preset/API decouple before preset change.', error);
         });
-        getCurrentPresetName().then(preset => {
-            state.currentPreset = preset;
-            updateToolBallTitle();
+    }
+
+    function handlePresetChangedForApiGuard() {
+        enforcePresetConnectionDecouple().catch(error => {
+            console.warn('[Chat Search Jump] Failed to enforce preset/API decouple after preset change.', error);
         });
         if (state.apiSwitching) {
             return;
@@ -1277,7 +1252,18 @@
         }
     }
 
-    function bindToolPanelCoreButtons() {
+    function renderToolPanelLoading() {
+        elements.toolPanel.innerHTML = `
+            <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
+            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
+            <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
+            <div class="stcsj-tool-section-title">API 配置</div>
+            <div class="stcsj-api-status">${getApiGuardStatusHtml()}</div>
+            <div class="stcsj-tool-note">扩展默认只切 API / URL / 模型 / 密钥，不再跟着切 Settings Preset。</div>
+            <div class="stcsj-tool-empty">读取配置中...</div>`;
+
+        positionToolPanel();
+
         elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
             closeToolPanel();
             openPanel('search');
@@ -1288,36 +1274,24 @@
         });
     }
 
-    function renderToolPanelLoading() {
-        elements.toolPanel.innerHTML = `
-            <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API / 预设保护</div>
-            ${getApiGuardStatusHtml()}
-            <div class="stcsj-tool-empty">读取配置中...</div>`;
-
-        bindToolPanelCoreButtons();
-    }
-
     async function renderToolPanel() {
         renderToolPanelLoading();
-        const [profiles, current, currentPreset] = await Promise.all([getProfiles(), getCurrentProfile(), getCurrentPresetName()]);
+        const [profiles, current] = await Promise.all([getProfiles(), getCurrentProfile()]);
         if (!state.toolsOpen) {
             return;
         }
 
         state.currentProfile = current;
-        state.currentPreset = currentPreset;
         updateToolBallTitle();
 
         const settings = getSettings();
+        applyOfficialPresetConnectionDecouple();
         const presetBoundCount = countPresetBoundProfiles();
+        const presetDecoupleChecked = checkedAttribute(settings.decouplePresetConnection);
+        const profileLockChecked = checkedAttribute(settings.lockApiProfile);
         const apiOnlyChecked = checkedAttribute(settings.apiOnlySwitching);
-        const decoupleChecked = checkedAttribute(settings.decouplePresetConnection);
-        const lockChecked = checkedAttribute(settings.lockApiProfile);
         const apiModeText = settings.apiOnlySwitching ? 'API-only：不改预设' : '完整 Profile：会按配置切预设';
-        const lockedProfileText = settings.lockApiProfile && settings.lockedProfile ? settings.lockedProfile : '未锁定';
+        const guardStatusHtml = getApiGuardStatusHtml();
 
         const profileHtml = profiles.length
             ? profiles.map(name => {
@@ -1334,27 +1308,31 @@
             <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API / 预设保护</div>
-            <div class="stcsj-current-profile"><span>当前 API</span><strong>${escapeHtml(current || '未知')}</strong></div>
-            <div class="stcsj-current-profile"><span>当前预设</span><strong>${escapeHtml(currentPreset || '未知')}</strong></div>
-            ${getApiGuardStatusHtml()}
-            <label class="stcsj-tool-toggle" title="开启后，会关闭 SillyTavern 的 Chat Completion 预设/API绑定，并在预设切换事件里剥离连接字段。">
-                <input type="checkbox" id="${ID}-decouple-native"${decoupleChecked}>
-                <span>切预设不改 API</span>
-            </label>
-            <label class="stcsj-tool-toggle" title="开启后，点下面 Profile 只应用 API / URL / 模型 / 代理 / 密钥，不应用 Settings Preset。">
+            <div class="stcsj-tool-section-title">API 配置</div>
+            <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(current || '未知')}</strong></div>
+            <div class="stcsj-api-guard">
+                <label class="stcsj-tool-toggle" title="开启后，扩展会关闭 SillyTavern 的预设/API 绑定，并在切预设后恢复当前连接。">
+                    <input type="checkbox" id="${ID}-preset-decouple"${presetDecoupleChecked}>
+                    <span><strong>预设不改 API</strong><small>自动关闭官方绑定，旧版用锁定兜底</small></span>
+                </label>
+                <label class="stcsj-tool-toggle" title="切换 Settings Preset 后，如果 API 被带跑，会恢复到锁定的 Connection Profile。">
+                    <input type="checkbox" id="${ID}-profile-lock"${profileLockChecked}>
+                    <span><strong>锁定当前连接</strong><small>切预设后保持这个 API / 模型</small></span>
+                </label>
+                <div class="stcsj-api-status">${guardStatusHtml}</div>
+                <button type="button" class="stcsj-tool-action stcsj-tool-action-compact" id="${ID}-lock-current-profile"><i class="fa-solid fa-thumbtack"></i><span>把当前 API 设为锁定</span></button>
+                <button type="button" class="stcsj-tool-action stcsj-tool-action-compact" id="${ID}-unlock-profile"${settings.lockedProfile ? '' : ' disabled'}><i class="fa-solid fa-lock-open"></i><span>解除 API 锁定</span></button>
+            </div>
+            <label class="stcsj-tool-toggle" title="开启后，点下面 Profile 只应用 API / URL / 模型 / 密钥，不应用 Settings Preset。">
                 <input type="checkbox" id="${ID}-api-only-switch"${apiOnlyChecked}>
-                <span>${escapeHtml(apiModeText)}</span>
+                <span><strong>${escapeHtml(apiModeText)}</strong><small>悬浮球切 Profile 时不顺手换预设</small></span>
             </label>
-            <label class="stcsj-tool-toggle" title="切预设或外部操作导致 API Profile 改变时，自动拉回锁定的 Profile。">
-                <input type="checkbox" id="${ID}-lock-profile"${lockChecked}>
-                <span>锁定当前 API Profile：${escapeHtml(lockedProfileText)}</span>
-            </label>
-            <button type="button" class="stcsj-tool-action" id="${ID}-lock-current-profile"><i class="fa-solid fa-lock"></i><span>把当前 API 设为锁定</span><i class="fa-solid fa-check"></i></button>
-            <div class="stcsj-tool-note">默认用三层保护：关闭官方绑定、切 Profile 只套 API 字段、必要时拉回锁定 API。</div>
             <button type="button" class="stcsj-tool-action" id="${ID}-decouple-profiles"><i class="fa-solid fa-link-slash"></i><span>解绑已有 Profile 的预设</span><strong class="stcsj-tool-count stcsj-profile-preset-count">${presetBoundCount}</strong></button>
+            <div class="stcsj-tool-note">上面两个开关管“切预设别改 API”；API-only 管“点 Profile 别改预设”。</div>
             <div class="stcsj-profile-list">${profileHtml}</div>
             <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
+
+        positionToolPanel();
 
         elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
             closeToolPanel();
@@ -1364,8 +1342,26 @@
             closeToolPanel();
             openPanel('favorites');
         });
-        elements.toolPanel.querySelector(`#${ID}-decouple-native`)?.addEventListener('change', async event => {
-            await setPresetConnectionDecouple(event.currentTarget.checked);
+        elements.toolPanel.querySelector(`#${ID}-preset-decouple`)?.addEventListener('change', async event => {
+            await setPresetConnectionDecouple(Boolean(event.currentTarget.checked));
+            await renderToolPanel();
+        });
+        elements.toolPanel.querySelector(`#${ID}-profile-lock`)?.addEventListener('change', async event => {
+            await setApiProfileLock(Boolean(event.currentTarget.checked));
+            await renderToolPanel();
+        });
+        elements.toolPanel.querySelector(`#${ID}-lock-current-profile`)?.addEventListener('click', async () => {
+            await setLockedProfileToCurrent({ notify: true });
+            await enforcePresetConnectionDecouple({ notify: false });
+            await renderToolPanel();
+        });
+        elements.toolPanel.querySelector(`#${ID}-unlock-profile`)?.addEventListener('click', async () => {
+            const settings = getSettings();
+            settings.lockedProfile = '';
+            settings.lockApiProfile = false;
+            saveSettings();
+            updateToolBallTitle();
+            globalThis.toastr?.info?.('已解除 API 配置锁定', 'SillyTavern Tool Ball');
             await renderToolPanel();
         });
         elements.toolPanel.querySelector(`#${ID}-api-only-switch`)?.addEventListener('change', event => {
@@ -1374,17 +1370,8 @@
             saveSettings();
             renderToolPanel();
         });
-        elements.toolPanel.querySelector(`#${ID}-lock-profile`)?.addEventListener('change', async event => {
-            await setApiProfileLock(event.currentTarget.checked);
-            await renderToolPanel();
-        });
-        elements.toolPanel.querySelector(`#${ID}-lock-current-profile`)?.addEventListener('click', async () => {
-            await setLockedProfileToCurrent({ notify: true });
-            await renderToolPanel();
-        });
         elements.toolPanel.querySelector(`#${ID}-decouple-profiles`)?.addEventListener('click', async () => {
             await decouplePresetFromConnectionProfiles();
-            await ensurePresetConnectionDecoupled({ notify: false, triggerUi: true });
             await renderToolPanel();
         });
         elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
@@ -1398,26 +1385,23 @@
                 }
 
                 item.classList.add('loading');
-                suppressProfileRestore(4000);
+                suppressProfileRestore(5000);
                 if (settings.apiOnlySwitching) {
                     await switchProfileApiOnly(name);
                     state.currentProfile = await getCurrentProfile() || name;
-                    state.currentPreset = await getCurrentPresetName();
                     const profile = await getConnectionProfileDetails(name);
                     updateToolBallTitle();
                     globalThis.toastr?.success?.(`已切换 API，不改预设：${name}${profile ? `（${describeApiOnlyProfile(profile)}）` : ''}`, 'SillyTavern Tool Ball');
                 } else {
                     await switchProfile(name);
-                    await ensurePresetConnectionDecoupled({ notify: false });
+                    await enforcePresetConnectionDecouple({ notify: false });
                     state.currentProfile = await getCurrentProfile() || name;
-                    state.currentPreset = await getCurrentPresetName();
                     updateToolBallTitle();
                     globalThis.toastr?.success?.(`已完整切换到：${name}`, 'SillyTavern Tool Ball');
                 }
-
                 const latestSettings = getSettings();
-                if (latestSettings.lockApiProfile) {
-                    latestSettings.lockedProfile = state.currentProfile || name;
+                if (latestSettings.lockApiProfile && state.currentProfile) {
+                    latestSettings.lockedProfile = state.currentProfile;
                     saveSettings();
                 }
                 closeToolPanel();
@@ -1888,12 +1872,19 @@
     }
 
     function updateToolBallTitle() {
+        if (!elements.toggle) {
+            return;
+        }
+        const settings = getSettings();
         const parts = ['酒馆工具'];
         if (state.currentProfile) {
             parts.push(`当前 API：${state.currentProfile}`);
         }
-        if (state.currentPreset) {
-            parts.push(`当前预设：${state.currentPreset}`);
+        if (settings.decouplePresetConnection) {
+            parts.push('切预设不改 API');
+        }
+        if (settings.lockApiProfile && settings.lockedProfile) {
+            parts.push(`锁定：${settings.lockedProfile}`);
         }
         elements.toggle.title = parts.join('｜');
     }
@@ -1925,21 +1916,39 @@
 
     function positionToolPanel() {
         const settings = getBallSettings();
-        const panelWidth = 306;
-        const panelHeight = 460;
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
+        const panelWidth = elements.toolPanel?.offsetWidth || Math.min(306, viewportWidth - 16);
+        const maxPanelHeight = Math.min(570, Math.max(180, viewportHeight - 16));
+        const panelHeight = Math.min(elements.toolPanel?.scrollHeight || maxPanelHeight, maxPanelHeight);
         const ballWidth = elements.toggle.offsetWidth || 50;
         let left = settings.ballX + ballWidth + 10;
         let top = settings.ballY - 10;
 
-        if (left + panelWidth > window.innerWidth - 8) {
+        if (left + panelWidth > viewportWidth - 8) {
             left = settings.ballX - panelWidth - 10;
         }
-        if (top + panelHeight > window.innerHeight - 8) {
-            top = window.innerHeight - panelHeight - 8;
-        }
+        left = Math.max(8, Math.min(left, viewportWidth - panelWidth - 8));
 
-        elements.toolPanel.style.left = `${Math.max(8, left)}px`;
-        elements.toolPanel.style.top = `${Math.max(8, top)}px`;
+        if (top + panelHeight > viewportHeight - 8) {
+            top = viewportHeight - panelHeight - 8;
+        }
+        top = Math.max(8, top);
+
+        elements.toolPanel.style.left = `${left}px`;
+        elements.toolPanel.style.top = `${top}px`;
+        elements.toolPanel.style.maxHeight = `${Math.max(180, Math.min(570, viewportHeight - top - 8))}px`;
+    }
+
+    function stopToolPanelScrollBubble(event) {
+        if (elements.toolPanel?.contains(event.target)) {
+            event.stopPropagation();
+        }
+    }
+
+    function attachToolPanelScrollGuard() {
+        elements.toolPanel?.addEventListener('wheel', stopToolPanelScrollBubble, { passive: true });
+        elements.toolPanel?.addEventListener('touchmove', stopToolPanelScrollBubble, { passive: true });
     }
 
     function attachToolBallDrag() {
@@ -2033,6 +2042,7 @@
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input id="${ID}-input" type="search" placeholder="输入关键词" autocomplete="off">
                     </label>
+                    <button type="button" class="stcsj-text-btn stcsj-api-open" id="${ID}-open-api-from-search" title="打开预设/API 解耦设置"><i class="fa-solid fa-link-slash"></i><span>API</span></button>
                     <button type="button" class="stcsj-icon-btn" id="${ID}-close" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="stcsj-options">
@@ -2063,6 +2073,7 @@
         elements.panel = document.getElementById(`${ID}-panel`);
         elements.input = document.getElementById(`${ID}-input`);
         elements.close = document.getElementById(`${ID}-close`);
+        elements.openApiFromSearch = document.getElementById(`${ID}-open-api-from-search`);
         elements.caseSensitive = document.getElementById(`${ID}-case`);
         elements.includeHidden = document.getElementById(`${ID}-hidden`);
         elements.includeNames = document.getElementById(`${ID}-names`);
@@ -2081,10 +2092,15 @@
 
         clampToolBall();
         attachToolBallDrag();
+        attachToolPanelScrollGuard();
         syncSettingsToUi();
         updateFavoriteCount();
 
         elements.close.addEventListener('click', closePanel);
+        elements.openApiFromSearch?.addEventListener('click', () => {
+            closePanel();
+            openToolPanel();
+        });
         elements.input.addEventListener('input', () => {
             state.mode = 'search';
             scheduleSearch();
@@ -2208,25 +2224,6 @@
             }
         };
 
-        on('OAI_PRESET_CHANGED_BEFORE', stripConnectionFieldsFromPresetEvent);
-        on('OAI_PRESET_CHANGED_AFTER', handlePresetChangedForApiGuard);
-        on('PRESET_CHANGED', handlePresetChangedForApiGuard);
-        on('CONNECTION_PROFILE_LOADED', () => {
-            applyOfficialPresetConnectionDecouple();
-            getCurrentProfile().then(profile => {
-                state.currentProfile = profile;
-                updateToolBallTitle();
-            });
-        });
-        on('SETTINGS_UPDATED', () => {
-            applyOfficialPresetConnectionDecouple();
-            if (state.toolsOpen) {
-                renderToolPanel();
-            }
-        });
-        on('MAIN_API_CHANGED', handlePresetChangedForApiGuard);
-        on('CHATCOMPLETION_SOURCE_CHANGED', handlePresetChangedForApiGuard);
-        on('CHATCOMPLETION_MODEL_CHANGED', handlePresetChangedForApiGuard);
         on('CHAT_CHANGED', clearOnChatChange);
         on('MESSAGE_EDITED', scheduleSearch);
         on('MESSAGE_DELETED', scheduleSearch);
@@ -2234,6 +2231,13 @@
         on('MESSAGE_UPDATED', scheduleSearch);
         on('USER_MESSAGE_RENDERED', scheduleSearch);
         on('CHARACTER_MESSAGE_RENDERED', scheduleSearch);
+
+        on('OAI_PRESET_CHANGED_BEFORE', stripConnectionFieldsFromPresetEvent);
+        on('OAI_PRESET_CHANGED_AFTER', handlePresetChangedForApiGuard);
+        on('PRESET_CHANGED', handlePresetChangedForApiGuard);
+        on('SETTINGS_UPDATED', () => enforcePresetConnectionDecouple({ notify: false }));
+        on('MAIN_API_CHANGED', handlePresetChangedForApiGuard);
+        on('GENERATION_STARTED', () => restoreLockedProfileIfNeeded('generation started'));
     }
 
     function init() {
@@ -2245,22 +2249,26 @@
         createUi();
         subscribeToEvents();
 
-        ensurePresetConnectionDecoupled({ notify: false, triggerUi: true })
-            .then(seedLockedProfileIfNeeded)
-            .catch(error => console.warn('[SillyTavern Tool Ball] Failed to initialize API guard.', error));
-
-        Promise.all([getCurrentProfile(), getCurrentPresetName()]).then(([profile, preset]) => {
+        getCurrentProfile().then(async profile => {
             state.currentProfile = profile;
-            state.currentPreset = preset;
+            await enforcePresetConnectionDecouple({ notify: false });
+            await seedLockedProfileIfNeeded();
             updateToolBallTitle();
+        }).catch(error => {
+            console.warn('[Chat Search Jump] Failed to initialize API guard.', error);
         });
 
+        window.setInterval(() => {
+            enforcePresetConnectionDecouple({ notify: false }).catch(error => {
+                console.warn('[Chat Search Jump] Periodic preset/API decouple failed.', error);
+            });
+        }, API_GUARD_ENFORCE_MS);
+
         window.setInterval(async () => {
-            await ensurePresetConnectionDecoupled({ notify: false });
+            await restoreLockedProfileIfNeeded('periodic check');
             state.currentProfile = await getCurrentProfile();
-            state.currentPreset = await getCurrentPresetName();
             updateToolBallTitle();
-        }, 30000);
+        }, PROFILE_LOCK_POLL_MS);
 
         console.info('[Chat Search Jump] loaded');
     }
