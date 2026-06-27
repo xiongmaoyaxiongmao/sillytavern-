@@ -1,10 +1,10 @@
 {
-  "display_name": "SillyTavern Tool Ball",
-  "loading_order": 100,
-  "dependencies": [],
-  "js": "index.js",
-  "css": "style.css",
-  "author": "Codex",
-  "version": "0.2.1",
-  "auto_update": false
+    "display_name": "SillyTavern Tool Ball",
+    "loading_order": 100,
+    "dependencies": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "Codex",
+    "version": "0.3.0",
+    "auto_update": false
 }
