@@ -10,6 +10,7 @@
     const SEARCH_DEBOUNCE_MS = 120;
     const API_GUARD_ENFORCE_MS = 2500;
     const PROFILE_LOCK_POLL_MS = 5000;
+    const PROFILE_SWITCH_TIMEOUT_MS = 5000;
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
     const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
     const SNAPSHOT_RADIUS = 3;
@@ -179,8 +180,10 @@
         return (await runSlashCommand('/profile')).trim();
     }
 
-    async function switchProfile(name) {
-        await runSlashCommand(`/profile ${quoteSlashArg(name)}`);
+    async function switchProfile(name, { timeout = PROFILE_SWITCH_TIMEOUT_MS } = {}) {
+        const timeoutMs = Math.max(0, Number(timeout) || 0);
+        const timeoutArg = timeoutMs ? ` timeout=${timeoutMs}` : '';
+        return await runSlashCommand(`/profile await=true${timeoutArg} ${quoteSlashArg(name)}`);
     }
 
     function clonePlainObject(value) {
@@ -329,26 +332,32 @@
     async function switchProfileApiOnly(name) {
         const profile = await getConnectionProfileDetails(name);
         const previousPreset = await getCurrentPresetName();
-        const official = applyOfficialPresetConnectionDecouple();
+        const official = await enforcePresetConnectionDecouple();
 
         state.apiSwitching = true;
-        suppressProfileRestore(4000);
+        suppressProfileRestore(7000);
         try {
-            // Newer SillyTavern builds have the native “bind preset to connection” switch.
-            // With that disabled, the safest way to keep API keys/proxies intact is to load
-            // the full profile first, then restore the previous Settings Preset.
+            // Prefer SillyTavern's own profile loader, because it applies the profile mode
+            // and waits for the connection path instead of only rewriting a few visible fields.
             if (official.available && previousPreset) {
-                await switchProfile(name);
-                applyOfficialPresetConnectionDecouple();
-                await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
-                if (profile) {
-                    await markConnectionProfileSelected(profile);
+                const switchedName = await switchProfile(name);
+                if (switchedName) {
+                    await enforcePresetConnectionDecouple();
+                    await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
+                    await enforcePresetConnectionDecouple();
+                    if (profile) {
+                        await markConnectionProfileSelected(profile);
+                    }
+                    return profile?.name || switchedName || name;
                 }
-                return profile?.name || name;
+
+                console.warn('[SillyTavern Tool Ball] Native profile switch returned no profile; falling back to field commands.', name);
             }
 
-            // Older builds do not have the native toggle. In that case, apply the fields that
-            // affect the connection directly and deliberately skip the profile's preset field.
+            if (previousPreset && !official.available) {
+                console.warn('[SillyTavern Tool Ball] Preset/API binding switch is not available; using field-level API-only switch.', name);
+            }
+
             if (profile) {
                 const appliedCount = await applyProfileFieldsWithoutPreset(profile);
                 if (appliedCount > 0) {
@@ -358,16 +367,16 @@
             }
 
             globalThis.toastr?.warning?.('没有找到可单独应用的 API 字段，已改用完整 Profile 切换。', 'SillyTavern Tool Ball');
-            await switchProfile(name);
+            const switchedName = await switchProfile(name);
             if (official.available && previousPreset) {
-                applyOfficialPresetConnectionDecouple();
+                await enforcePresetConnectionDecouple();
                 await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
             }
-            return profile?.name || name;
+            return profile?.name || switchedName || name;
         } finally {
             setTimeout(() => {
                 state.apiSwitching = false;
-            }, 600);
+            }, 1000);
         }
     }
 
@@ -471,36 +480,6 @@
         return {
             available: domResult.available || nativeResult.available,
             changed: domResult.changed || nativeResult.changed,
-        };
-    }
-
-    function getOfficialPresetConnectionBindState() {
-        const checkbox = getPresetConnectionBindCheckbox();
-        if (!checkbox) {
-            if (state.nativePresetBindKnown !== null) {
-                const bound = Boolean(state.nativePresetBindKnown);
-                return {
-                    available: true,
-                    bound,
-                    label: bound ? '官方绑定：仍开启' : '官方绑定：已关闭',
-                    detail: bound ? '扩展会自动关掉它' : '切预设不会改 API 连接',
-                };
-            }
-            return {
-                available: false,
-                bound: null,
-                label: '官方绑定开关：未找到',
-                detail: '会用事件拦截和 API 锁兜底',
-            };
-        }
-
-        const bound = Boolean(checkbox.checked);
-        state.nativePresetBindKnown = bound;
-        return {
-            available: true,
-            bound,
-            label: bound ? '官方绑定：仍开启' : '官方绑定：已关闭',
-            detail: bound ? '扩展会自动关掉它' : '切预设不会改 API 连接',
         };
     }
 
@@ -720,18 +699,6 @@
         }
 
         scheduleLockedProfileSync('manual API changed');
-    }
-
-    function getApiGuardStatusHtml() {
-        const settings = getSettings();
-        const official = getOfficialPresetConnectionBindState();
-        const locked = settings.lockApiProfile && settings.lockedProfile
-            ? `锁定：${settings.lockedProfile}`
-            : (settings.lockApiProfile ? '锁定：等待读取当前配置' : '锁定：关闭');
-
-        return `
-            <div class="stcsj-api-status-line"><span>${escapeHtml(official.label)}</span><small>${escapeHtml(official.detail)}</small></div>
-            <div class="stcsj-api-status-line"><span>${escapeHtml(locked)}</span><small>${settings.decouplePresetConnection ? '保护中' : '未保护'}</small></div>`;
     }
 
     function stripHtml(value) {
@@ -1423,7 +1390,6 @@
             <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
             <div class="stcsj-tool-section-title">API 配置</div>
-            <div class="stcsj-api-status">${getApiGuardStatusHtml()}</div>
             <div class="stcsj-tool-note">扩展默认只切 API / URL / 模型 / 密钥，不再跟着切 Settings Preset。</div>
             <div class="stcsj-tool-empty">读取配置中...</div>`;
 
@@ -1455,7 +1421,6 @@
         const presetDecoupleChecked = checkedAttribute(settings.decouplePresetConnection);
         const apiOnlyChecked = checkedAttribute(settings.apiOnlySwitching);
         const apiModeText = settings.apiOnlySwitching ? 'API-only：不改预设' : '完整 Profile：会按配置切预设';
-        const guardStatusHtml = getApiGuardStatusHtml();
 
         const profileHtml = profiles.length
             ? profiles.map(name => {
@@ -1479,7 +1444,6 @@
                     <input type="checkbox" id="${ID}-preset-decouple"${presetDecoupleChecked}>
                     <span><strong>预设不改 API</strong><small>当前 API / 模型会自动守住</small></span>
                 </label>
-                <div class="stcsj-api-status">${guardStatusHtml}</div>
             </div>
             <label class="stcsj-tool-toggle" title="开启后，点下面 Profile 只应用 API / URL / 模型 / 密钥，不应用 Settings Preset。">
                 <input type="checkbox" id="${ID}-api-only-switch"${apiOnlyChecked}>
@@ -2153,9 +2117,6 @@
         }
         if (settings.decouplePresetConnection) {
             parts.push('切预设不改 API');
-        }
-        if (settings.lockApiProfile && settings.lockedProfile) {
-            parts.push(`锁定：${settings.lockedProfile}`);
         }
         elements.toggle.title = parts.join('｜');
     }

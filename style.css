@@ -237,30 +237,6 @@
     opacity: 0.72;
 }
 
-.stcsj-api-status-line {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin: 4px 12px;
-    padding: 7px 9px;
-    border-radius: 8px;
-    background: var(--stcsj-softer);
-    font-size: 12px;
-}
-
-.stcsj-api-status-line span,
-.stcsj-api-status-line small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.stcsj-api-status-line small {
-    opacity: 0.68;
-}
-
 .stcsj-tool-empty {
     padding: 14px 12px;
     font-size: 13px;
@@ -804,39 +780,7 @@
     background: rgba(122, 183, 255, 0.055);
 }
 
-.stcsj-api-status {
-    margin: 4px 6px 6px;
-    padding: 8px;
-    border-radius: 8px;
-    background: rgba(0, 0, 0, 0.14);
-}
-
-.stcsj-api-status-line {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 11px;
-    line-height: 1.45;
-}
-
-.stcsj-api-status-line span,
-.stcsj-api-status-line small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.stcsj-api-status-line span {
-    color: var(--stcsj-accent);
-}
-
-.stcsj-api-status-line small {
-    opacity: 0.68;
-}
-
 .stcsj-tool-action-compact {
     padding-top: 8px;
     padding-bottom: 8px;
 }
-
