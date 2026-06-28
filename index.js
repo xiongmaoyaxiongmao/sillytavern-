@@ -355,7 +355,7 @@
             }
 
             if (previousPreset && !official.available) {
-                console.warn('[SillyTavern Tool Ball] Preset/API binding switch is not available; using field-level API-only switch.', name);
+                console.warn('[SillyTavern Tool Ball] Preset/API binding switch is not available; using field-level profile switch.', name);
             }
 
             if (profile) {
@@ -392,10 +392,6 @@
     }
 
     const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
-
-    function checkedAttribute(value) {
-        return value ? ' checked' : '';
-    }
 
     function getPresetConnectionBindCheckbox() {
         return document.getElementById(OFFICIAL_PRESET_CONNECTION_BIND_ID);
@@ -539,20 +535,6 @@
             return settings.lockedProfile || '';
         }
         return setLockedProfileToCurrent({ notify: false });
-    }
-
-    async function setPresetConnectionDecouple(enabled) {
-        const settings = getSettings();
-        settings.decouplePresetConnection = Boolean(enabled);
-        saveSettings();
-
-        if (enabled) {
-            await enforcePresetConnectionDecouple({ notify: true });
-            await seedLockedProfileIfNeeded();
-            globalThis.toastr?.success?.('已开启：切换预设不改 API', 'SillyTavern Tool Ball');
-        } else {
-            globalThis.toastr?.info?.('已关闭：允许预设改动 API', 'SillyTavern Tool Ball');
-        }
     }
 
     function suppressProfileRestore(durationMs = 1800) {
@@ -1418,10 +1400,6 @@
         const settings = getSettings();
         applyOfficialPresetConnectionDecouple();
         await seedLockedProfileIfNeeded();
-        const presetDecoupleChecked = checkedAttribute(settings.decouplePresetConnection);
-        const apiOnlyChecked = checkedAttribute(settings.apiOnlySwitching);
-        const apiModeText = settings.apiOnlySwitching ? 'API-only：不改预设' : '完整 Profile：会按配置切预设';
-
         const profileHtml = profiles.length
             ? profiles.map(name => {
                 const active = name === current;
@@ -1439,17 +1417,6 @@
             <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
             <div class="stcsj-tool-section-title">API 配置</div>
             <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(current || '未知')}</strong></div>
-            <div class="stcsj-api-guard">
-                <label class="stcsj-tool-toggle" title="开启后，扩展会关闭 SillyTavern 的预设/API 绑定；当前 API 连接会在后台自动保护，不再显示单独锁定开关。">
-                    <input type="checkbox" id="${ID}-preset-decouple"${presetDecoupleChecked}>
-                    <span><strong>预设不改 API</strong><small>当前 API / 模型会自动守住</small></span>
-                </label>
-            </div>
-            <label class="stcsj-tool-toggle" title="开启后，点下面 Profile 只应用 API / URL / 模型 / 密钥，不应用 Settings Preset。">
-                <input type="checkbox" id="${ID}-api-only-switch"${apiOnlyChecked}>
-                <span><strong>${escapeHtml(apiModeText)}</strong><small>悬浮球切 Profile 时不顺手换预设</small></span>
-            </label>
-            <div class="stcsj-tool-note">当前 API 会在后台自动保护；点下面 Profile 默认只切 API / 模型，不改当前预设。</div>
             <div class="stcsj-profile-list">${profileHtml}</div>
             <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
 
@@ -1462,16 +1429,6 @@
         elements.toolPanel.querySelector(`#${ID}-open-favorites`)?.addEventListener('click', () => {
             closeToolPanel();
             openPanel('favorites');
-        });
-        elements.toolPanel.querySelector(`#${ID}-preset-decouple`)?.addEventListener('change', async event => {
-            await setPresetConnectionDecouple(Boolean(event.currentTarget.checked));
-            await renderToolPanel();
-        });
-        elements.toolPanel.querySelector(`#${ID}-api-only-switch`)?.addEventListener('change', event => {
-            const settings = getSettings();
-            settings.apiOnlySwitching = Boolean(event.currentTarget.checked);
-            saveSettings();
-            renderToolPanel();
         });
         elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
@@ -2110,13 +2067,9 @@
         if (!elements.toggle) {
             return;
         }
-        const settings = getSettings();
         const parts = ['酒馆工具'];
         if (state.currentProfile) {
             parts.push(`当前 API：${state.currentProfile}`);
-        }
-        if (settings.decouplePresetConnection) {
-            parts.push('切预设不改 API');
         }
         elements.toggle.title = parts.join('｜');
     }

@@ -772,14 +772,6 @@
     opacity: 0.72;
 }
 
-.stcsj-api-guard {
-    margin: 2px 6px 6px;
-    padding: 6px 0;
-    border: 1px solid rgba(122, 183, 255, 0.14);
-    border-radius: 8px;
-    background: rgba(122, 183, 255, 0.055);
-}
-
 .stcsj-tool-action-compact {
     padding-top: 8px;
     padding-bottom: 8px;

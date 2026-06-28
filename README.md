@@ -2,6 +2,10 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.11
+
+- 隐藏前端的 `预设不改 API` 和 `API-only：不改预设` 两个开关，相关逻辑改为后台默认运行。
+
 ## v0.5.10
 
 - 修复 `manifest.json` 的 `homePage`，统一指向 `https://github.com/xiongmaoyaxiongmao/sillytavern-.git`。
