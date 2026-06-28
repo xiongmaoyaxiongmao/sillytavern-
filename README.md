@@ -2,6 +2,13 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.12
+
+- 重做 Profile 切换：不再调用 SillyTavern 原生 `/profile` 全量加载，避免 preset/proxy 把 API 覆盖回旧值。
+- 点击 Profile 只应用连接字段：API、API URL、模型、密钥，并同步 Connection Manager 当前选中项。
+- 对 Custom OpenAI-compatible Profile 会清掉旧 reverse proxy，避免 `proxy: 风铃草` 覆盖 Profile 自己的 `api-url`。
+- 后台 API / preset 解耦强制开启，不再受旧保存开关影响。
+
 ## v0.5.11
 
 - 隐藏前端的 `预设不改 API` 和 `API-only：不改预设` 两个开关，相关逻辑改为后台默认运行。
@@ -10,7 +17,7 @@
 
 - 修复 `manifest.json` 的 `homePage`，统一指向 `https://github.com/xiongmaoyaxiongmao/sillytavern-.git`。
 - 版本号更新到 `0.5.10`，避免扩展管理器继续显示旧版。
-- Profile 切 API 改为优先走 SillyTavern 原生 `/profile await=true timeout=5000 ...`，切完后恢复原 Settings Preset。
+- 曾短暂改为走 SillyTavern 原生 `/profile`，已在 v0.5.12 改为扩展自有连接应用器。
 - 移除前端“官方绑定 / 锁定”状态卡，只保留后台守护逻辑。
 
 ## v0.5.8
@@ -31,7 +38,7 @@
 
 - 改成 Git 可更新版：`manifest.json` 已添加 `homePage`，并把 `auto_update` 设为 `true`。
 - 保留 v0.5.1：搜索弹窗右上角 `API` 入口，可直接打开“预设/API 解耦”工具面板。
-- 保留：预设不改 API、隐藏默认的当前连接保护、API-only 切换 Profile、搜索跳转、自动加载旧楼层、收藏消息。
+- 保留：后台预设/API 解耦、隐藏默认的当前连接保护、连接字段切换 Profile、搜索跳转、自动加载旧楼层、收藏消息。
 
 ## 本版修复 / 新增
 
@@ -39,7 +46,7 @@
 - 新增切预设前拦截：监听 `OAI_PRESET_CHANGED_BEFORE`，在预设真正应用前移除 API 连接字段；就算官方开关一时没渲染出来，也能拦住一层。
 - API 锁改为隐藏默认：扩展会把当前 Connection Profile 当成后台守护目标；如果某个预设或插件把 API 带跑，会自动恢复。
 - 手动换 API / Connection Profile 时，后台守护目标会同步到新的当前连接。
-- 保留 API-only Profile 切换：用悬浮球点 Profile 时默认只切 `api`、`api-url`、`model`、`proxy`、`secret-id`，不切 Settings Preset。
+- 保留连接字段 Profile 切换：用悬浮球点 Profile 时只切 `api`、`api-url`、`model`、`secret-id`，不切 Settings Preset，也不执行 Profile 里的 `proxy`。
 - 保留并修复聊天搜索：点击搜索结果跳转对应楼层。
 - 保留旧楼层自动加载：目标楼层还没渲染时，会循环触发 `#show_more_messages` 加载旧消息后再跳转。
 - 保留消息收藏：收藏保存在当前聊天的 `chatMetadata`，切换聊天不会串数据。
@@ -80,9 +87,9 @@ Extensions -> Manage extensions
 ## 使用
 
 - 单击悬浮球打开工具面板。
-- 默认开启 `预设不改 API`；“锁定当前连接”已隐藏为后台默认行为，不需要手动点。
+- API / 预设解耦和当前连接守护是后台默认行为，不需要手动点开关。
 - 之后正常切 Settings Preset；扩展会尽量保证 API / 模型 / endpoint 不跟着跑。
-- 点 Connection Profile 名称时，默认走 API-only 切换：换 API / 模型，不换当前 Settings Preset。
+- 点 Connection Profile 名称时，只应用连接字段：API、API URL、模型、密钥；不换当前 Settings Preset，也不执行 Profile 的 proxy 字段。
 - 如果你在 SillyTavern 原生界面手动换了 API / Connection Profile，扩展会把新的当前连接自动作为后台守护目标。
 - 点 `聊天搜索` 可搜索当前聊天；点击结果跳楼层。
 - 搜索结果右侧点星标可收藏消息；工具面板里的 `收藏消息` 可查看收藏。
@@ -104,18 +111,16 @@ Extensions -> Manage extensions
 - SillyTavern 内置 **Connection Profiles** 扩展已启用。
 - 已经在「API 连接 -> 连接配置」里创建至少一个配置。
 
-API-only Profile 切换主要调用这些斜杠命令：
+连接字段 Profile 切换主要调用这些斜杠命令：
 
 - `/profile-list`
-- `/profile`
 - `/profile-get 配置名`
 - `/api`
 - `/api-url`
 - `/model`
-- `/proxy`
 - `/secret-id`
 
-如果某些旧版本没有单字段切换命令，扩展会降级为完整 Profile 切换，然后恢复原来的 Settings Preset。
+Custom OpenAI-compatible Profile 会额外清掉旧 reverse proxy，防止旧代理预设覆盖 Profile 自己的 API URL。
 
 ## v0.5.4
 

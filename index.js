@@ -5,12 +5,10 @@
     const METADATA_KEY = 'chat_search_jump_favorites_v2';
     const ID = 'st-chat-search-jump';
     const CONNECTION_MANAGER_KEY = 'connectionManager';
-    const API_ONLY_PROFILE_COMMANDS = Object.freeze(['api', 'api-url', 'model', 'proxy', 'secret-id']);
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
     const API_GUARD_ENFORCE_MS = 2500;
     const PROFILE_LOCK_POLL_MS = 5000;
-    const PROFILE_SWITCH_TIMEOUT_MS = 5000;
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
     const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
     const SNAPSHOT_RADIUS = 3;
@@ -21,7 +19,6 @@
         includeHidden: true,
         includeNames: true,
         maxResults: 300,
-        apiOnlySwitching: true,
         ballX: null,
         ballY: null,
         decouplePresetConnection: true,
@@ -92,7 +89,8 @@
             }
         }
 
-        // “锁定当前连接”现在是隐藏默认行为：旧版保存成 false 的配置也会被拉回开启。
+        // API / preset 解耦和当前连接保护是后台默认行为，不再暴露前端开关。
+        settings.decouplePresetConnection = true;
         settings.lockApiProfile = true;
 
         return settings;
@@ -180,12 +178,6 @@
         return (await runSlashCommand('/profile')).trim();
     }
 
-    async function switchProfile(name, { timeout = PROFILE_SWITCH_TIMEOUT_MS } = {}) {
-        const timeoutMs = Math.max(0, Number(timeout) || 0);
-        const timeoutArg = timeoutMs ? ` timeout=${timeoutMs}` : '';
-        return await runSlashCommand(`/profile await=true${timeoutArg} ${quoteSlashArg(name)}`);
-    }
-
     function clonePlainObject(value) {
         if (!value || typeof value !== 'object') {
             return value;
@@ -255,7 +247,7 @@
         return parseJsonObject(await runSlashCommand(command));
     }
 
-    function describeApiOnlyProfile(profile) {
+    function describeConnectionProfile(profile) {
         if (!profile) {
             return '';
         }
@@ -264,15 +256,6 @@
             .map(value => String(value ?? '').trim())
             .filter(Boolean);
         return parts.length ? parts.join(' / ') : 'API 设置';
-    }
-
-    async function runProfileFieldCommand(command, value) {
-        if (value === undefined || value === null || value === '') {
-            return false;
-        }
-
-        await runSlashCommand(`/${command} ${quoteSlashArg(value)}`);
-        return true;
     }
 
     async function emitConnectionProfileLoaded(profile) {
@@ -314,70 +297,119 @@
         await emitConnectionProfileLoaded(profile);
     }
 
-    async function getCurrentPresetName() {
-        return (await runSlashCommand('/preset')).trim();
+    function getProfileField(profile, key) {
+        return String(profile?.[key] ?? '').trim();
     }
 
-    async function applyProfileFieldsWithoutPreset(profile) {
-        let appliedCount = 0;
-        for (const command of API_ONLY_PROFILE_COMMANDS) {
-            const applied = await runProfileFieldCommand(command, profile?.[command]);
-            if (applied) {
-                appliedCount += 1;
+    function setElementValue(selector, value, { emit = true } = {}) {
+        const element = document.querySelector(selector);
+        if (!element) {
+            return false;
+        }
+
+        element.value = String(value ?? '');
+        if (emit) {
+            emitInputAndChange(element);
+        }
+        return true;
+    }
+
+    async function syncCustomOpenAiFields(profile) {
+        if (getProfileField(profile, 'api') !== 'custom') {
+            return;
+        }
+
+        const apiUrl = getProfileField(profile, 'api-url');
+        const model = getProfileField(profile, 'model');
+        const module = await getOpenAiModule();
+
+        const proxySelect = document.querySelector('#openai_proxy_preset');
+        if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
+            proxySelect.value = 'None';
+            emitInputAndChange(proxySelect);
+        } else {
+            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
+            setElementValue('#openai_reverse_proxy', '');
+            setElementValue('#openai_proxy_password', '');
+            if (module?.oai_settings) {
+                module.oai_settings.reverse_proxy = '';
+                module.oai_settings.proxy_password = '';
             }
         }
-        return appliedCount;
+
+        if (apiUrl) {
+            if (module?.oai_settings) {
+                module.oai_settings.custom_url = apiUrl;
+                module.oai_settings.reverse_proxy = '';
+            }
+            setElementValue('#custom_api_url_text', apiUrl);
+            setElementValue('#openai_reverse_proxy', '');
+        }
+
+        if (model) {
+            if (module?.oai_settings) {
+                module.oai_settings.custom_model = model;
+            }
+            setElementValue('#custom_model_id', model);
+        }
     }
 
-    async function switchProfileApiOnly(name) {
-        const profile = await getConnectionProfileDetails(name);
-        const previousPreset = await getCurrentPresetName();
-        const official = await enforcePresetConnectionDecouple();
+    async function applyConnectionProfileFields(profile) {
+        if (!profile) {
+            return '';
+        }
+
+        const api = getProfileField(profile, 'api');
+        const apiUrl = getProfileField(profile, 'api-url');
+        const model = getProfileField(profile, 'model');
+        const secretId = getProfileField(profile, 'secret-id');
 
         state.apiSwitching = true;
         suppressProfileRestore(7000);
         try {
-            // Prefer SillyTavern's own profile loader, because it applies the profile mode
-            // and waits for the connection path instead of only rewriting a few visible fields.
-            if (official.available && previousPreset) {
-                const switchedName = await switchProfile(name);
-                if (switchedName) {
-                    await enforcePresetConnectionDecouple();
-                    await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
-                    await enforcePresetConnectionDecouple();
-                    if (profile) {
-                        await markConnectionProfileSelected(profile);
-                    }
-                    return profile?.name || switchedName || name;
-                }
+            await enforcePresetConnectionDecouple();
 
-                console.warn('[SillyTavern Tool Ball] Native profile switch returned no profile; falling back to field commands.', name);
+            if (api) {
+                await runSlashCommand(`/api quiet=true ${quoteSlashArg(api)}`);
             }
 
-            if (previousPreset && !official.available) {
-                console.warn('[SillyTavern Tool Ball] Preset/API binding switch is not available; using field-level profile switch.', name);
+            if (apiUrl) {
+                const apiArg = api ? ` api=${quoteSlashArg(api)}` : '';
+                await runSlashCommand(`/api-url${apiArg} connect=false quiet=true ${quoteSlashArg(apiUrl)}`);
             }
 
-            if (profile) {
-                const appliedCount = await applyProfileFieldsWithoutPreset(profile);
-                if (appliedCount > 0) {
-                    await markConnectionProfileSelected(profile);
-                    return profile.name || name;
-                }
+            if (model) {
+                await runSlashCommand(`/model quiet=true ${quoteSlashArg(model)}`);
             }
 
-            globalThis.toastr?.warning?.('没有找到可单独应用的 API 字段，已改用完整 Profile 切换。', 'SillyTavern Tool Ball');
-            const switchedName = await switchProfile(name);
-            if (official.available && previousPreset) {
-                await enforcePresetConnectionDecouple();
-                await runSlashCommand(`/preset ${quoteSlashArg(previousPreset)}`);
+            await syncCustomOpenAiFields(profile);
+
+            if (secretId) {
+                await runSlashCommand(`/secret-id quiet=true ${quoteSlashArg(secretId)}`);
             }
-            return profile?.name || switchedName || name;
+
+            await markConnectionProfileSelected(profile);
+
+            if (api === 'custom') {
+                document.querySelector('#api_button_openai')?.click();
+            }
+
+            await enforcePresetConnectionDecouple();
+            return profile.name || '';
         } finally {
             setTimeout(() => {
                 state.apiSwitching = false;
             }, 1000);
         }
+    }
+
+    async function applyConnectionProfileByName(name) {
+        const profile = await getConnectionProfileDetails(name);
+        if (!profile) {
+            globalThis.toastr?.warning?.(`没有找到连接配置：${name}`, 'SillyTavern Tool Ball');
+            return '';
+        }
+        return applyConnectionProfileFields(profile);
     }
 
     function escapeHtml(value) {
@@ -568,8 +600,8 @@
             return;
         }
 
-        suppressProfileRestore();
-        await switchProfile(settings.lockedProfile);
+        suppressProfileRestore(7000);
+        await applyConnectionProfileByName(settings.lockedProfile);
         const restored = await getCurrentProfile();
         state.currentProfile = restored || settings.lockedProfile;
         updateToolBallTitle();
@@ -1434,27 +1466,18 @@
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
             item.addEventListener('click', async () => {
                 const name = item.getAttribute('data-profile');
-                const settings = getSettings();
-                if (!name || (name === state.currentProfile && !settings.apiOnlySwitching)) {
+                if (!name) {
                     closeToolPanel();
                     return;
                 }
 
                 item.classList.add('loading');
                 suppressProfileRestore(5000);
-                if (settings.apiOnlySwitching) {
-                    await switchProfileApiOnly(name);
-                    state.currentProfile = await getCurrentProfile() || name;
-                    const profile = await getConnectionProfileDetails(name);
-                    updateToolBallTitle();
-                    globalThis.toastr?.success?.(`已切换 API，不改预设：${name}${profile ? `（${describeApiOnlyProfile(profile)}）` : ''}`, 'SillyTavern Tool Ball');
-                } else {
-                    await switchProfile(name);
-                    await enforcePresetConnectionDecouple({ notify: false });
-                    state.currentProfile = await getCurrentProfile() || name;
-                    updateToolBallTitle();
-                    globalThis.toastr?.success?.(`已完整切换到：${name}`, 'SillyTavern Tool Ball');
-                }
+                const appliedName = await applyConnectionProfileByName(name);
+                state.currentProfile = await getCurrentProfile() || appliedName || name;
+                const profile = await getConnectionProfileDetails(name);
+                updateToolBallTitle();
+                globalThis.toastr?.success?.(`已切换连接：${name}${profile ? `（${describeConnectionProfile(profile)}）` : ''}`, 'SillyTavern Tool Ball');
                 const latestSettings = getSettings();
                 if (latestSettings.lockApiProfile && state.currentProfile) {
                     latestSettings.lockedProfile = state.currentProfile;
