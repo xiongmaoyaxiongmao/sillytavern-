@@ -2,6 +2,13 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.10
+
+- 修复 `manifest.json` 的 `homePage`，统一指向 `https://github.com/xiongmaoyaxiongmao/sillytavern-.git`。
+- 版本号更新到 `0.5.10`，避免扩展管理器继续显示旧版。
+- Profile 切 API 改为优先走 SillyTavern 原生 `/profile await=true timeout=5000 ...`，切完后恢复原 Settings Preset。
+- 移除前端“官方绑定 / 锁定”状态卡，只保留后台守护逻辑。
+
 ## v0.5.8
 
 - 清理 API / 预设保护面板：移除可见的“锁定当前连接”开关，改成隐藏默认行为。
