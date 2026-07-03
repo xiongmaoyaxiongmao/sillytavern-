@@ -2,6 +2,12 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.13
+
+- 修复 Profile 切换后官方面板仍停在旧 Custom URL / model 的问题：现在通过 SillyTavern 原生输入事件写入 `custom_url` 和 `custom_model`，并立即调用原生 `saveSettings()` 落盘。
+- 切换 Profile 时不再触发 `#openai_proxy_preset` change，也不再自动点击官方连接按钮，避免面板卡在“连接中”。
+- 切换完成后会取消当前连接状态检查并恢复到未连接状态，连接动作交给用户手动连接或发消息时发生。
+
 ## v0.5.12
 
 - 重做 Profile 切换：不再调用 SillyTavern 原生 `/profile` 全量加载，避免 preset/proxy 把 API 覆盖回旧值。
@@ -111,16 +117,14 @@ Extensions -> Manage extensions
 - SillyTavern 内置 **Connection Profiles** 扩展已启用。
 - 已经在「API 连接 -> 连接配置」里创建至少一个配置。
 
-连接字段 Profile 切换主要调用这些斜杠命令：
+连接字段 Profile 切换会读取这些斜杠命令和官方状态：
 
 - `/profile-list`
 - `/profile-get 配置名`
 - `/api`
-- `/api-url`
-- `/model`
 - `/secret-id`
 
-Custom OpenAI-compatible Profile 会额外清掉旧 reverse proxy，防止旧代理预设覆盖 Profile 自己的 API URL。
+Custom OpenAI-compatible Profile 会通过官方输入事件写入 `custom_url` / `custom_model`，额外清掉旧 reverse proxy，并调用 SillyTavern 原生 `saveSettings()` 保存，防止旧代理预设覆盖 Profile 自己的 API URL。
 
 ## v0.5.4
 

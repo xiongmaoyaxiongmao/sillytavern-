@@ -326,15 +326,14 @@
         const proxySelect = document.querySelector('#openai_proxy_preset');
         if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
             proxySelect.value = 'None';
-            emitInputAndChange(proxySelect);
-        } else {
-            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
-            setElementValue('#openai_reverse_proxy', '');
-            setElementValue('#openai_proxy_password', '');
-            if (module?.oai_settings) {
-                module.oai_settings.reverse_proxy = '';
-                module.oai_settings.proxy_password = '';
-            }
+        }
+
+        setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
+        setElementValue('#openai_reverse_proxy', '');
+        setElementValue('#openai_proxy_password', '');
+        if (module?.oai_settings) {
+            module.oai_settings.reverse_proxy = '';
+            module.oai_settings.proxy_password = '';
         }
 
         if (apiUrl) {
@@ -389,12 +388,9 @@
             }
 
             await markConnectionProfileSelected(profile);
-
-            if (api === 'custom') {
-                document.querySelector('#api_button_openai')?.click();
-            }
-
             await enforcePresetConnectionDecouple();
+            await saveNativeSettingsNow();
+            await resetNativeConnectionStatus('connection profile switched');
             return profile.name || '';
         } finally {
             setTimeout(() => {
@@ -478,6 +474,54 @@
                 console.warn('[Chat Search Jump] Failed to access SillyTavern openai.js. DOM/event guards will still run.', error);
             }
             return null;
+        }
+    }
+
+    async function getCoreModule() {
+        if (!state.coreModulePromise) {
+            state.coreModulePromise = (async () => {
+                let lastError = null;
+                for (const path of CORE_MODULE_PATHS) {
+                    try {
+                        const module = await import(path);
+                        if (typeof module?.saveSettings === 'function') {
+                            return module;
+                        }
+                    } catch (error) {
+                        lastError = error;
+                    }
+                }
+                throw lastError || new Error('SillyTavern script.js module not found.');
+            })();
+        }
+
+        try {
+            return await state.coreModulePromise;
+        } catch (error) {
+            state.coreModulePromise = null;
+            console.warn('[Chat Search Jump] Failed to access SillyTavern script.js.', error);
+            return null;
+        }
+    }
+
+    async function saveNativeSettingsNow() {
+        const core = await getCoreModule();
+        if (typeof core?.saveSettings === 'function') {
+            await core.saveSettings();
+            return;
+        }
+
+        saveSettings();
+    }
+
+    async function resetNativeConnectionStatus(reason = 'connection profile switched') {
+        const core = await getCoreModule();
+        try {
+            core?.cancelStatusCheck?.(`[Chat Search Jump] ${reason}`);
+            core?.setOnlineStatus?.('no_connection');
+            core?.resultCheckStatus?.();
+        } catch (error) {
+            console.warn('[Chat Search Jump] Failed to reset native connection status.', error);
         }
     }
 
@@ -1404,7 +1448,6 @@
             <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
             <div class="stcsj-tool-section-title">API 配置</div>
-            <div class="stcsj-tool-note">扩展默认只切 API / URL / 模型 / 密钥，不再跟着切 Settings Preset。</div>
             <div class="stcsj-tool-empty">读取配置中...</div>`;
 
         positionToolPanel();

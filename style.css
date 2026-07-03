@@ -230,13 +230,6 @@
     white-space: nowrap;
 }
 
-.stcsj-tool-note {
-    margin: 0 12px 6px;
-    font-size: 12px;
-    line-height: 1.45;
-    opacity: 0.72;
-}
-
 .stcsj-tool-empty {
     padding: 14px 12px;
     font-size: 13px;
@@ -722,13 +715,6 @@
     .stcsj-snapshot-card-actions .stcsj-text-btn {
         flex: 1;
     }
-}
-
-.stcsj-tool-note {
-    margin: 4px 12px 8px;
-    font-size: 12px;
-    line-height: 1.45;
-    opacity: 0.72;
 }
 
 .stcsj-tool-toggle {
