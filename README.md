@@ -2,6 +2,12 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.16
+
+- API 管理器记录现在会先归一化为真实 Chat Completion 目标：`custom`、`claude`、`makersuite`，不再把所有 URL 都压成 Custom OpenAI。
+- Cloudflare AI Gateway 的 Anthropic 地址、`anthropic` 来源、`claude-*` 模型会走 Claude source + reverse proxy + Claude model，不再写入 `custom_url`。
+- 切换后当前状态校验同步支持 Claude reverse proxy，后台守护不会再把 CF Anthropic 目标误判成 Custom OpenAI 目标。
+
 ## v0.5.15
 
 - 重构 API 切换核心：新增插件自己的 `activeApiTargetKey`，当前 API 不再由 SillyTavern 官方 `selectedProfile` 决定。

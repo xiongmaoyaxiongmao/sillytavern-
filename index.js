@@ -6,6 +6,13 @@
     const ID = 'st-chat-search-jump';
     const CONNECTION_MANAGER_KEY = 'connectionManager';
     const API_CONFIG_MANAGER_KEY = 'api-config-manager';
+    const CHAT_SOURCE_CUSTOM = 'custom';
+    const CHAT_SOURCE_CLAUDE = 'claude';
+    const CHAT_SOURCE_MAKERSUITE = 'makersuite';
+    const MAIN_API_CHAT_COMPLETION = 'openai';
+    const SECRET_KEY_CUSTOM = 'api_key_custom';
+    const SECRET_KEY_CLAUDE = 'api_key_claude';
+    const SECRET_KEY_MAKERSUITE = 'api_key_makersuite';
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
     const API_GUARD_ENFORCE_MS = 2500;
@@ -255,28 +262,111 @@
         const material = [
             config?.name,
             config?.source,
-            config?.customUrl || config?.url,
+            config?.customUrl || config?.url || config?.reverseProxy,
             config?.model,
-            config?.secretIds?.api_key_custom,
+            config?.secretIds?.api_key_custom || config?.secretIds?.api_key_claude || config?.secretIds?.api_key_makersuite,
         ].join('|');
         return `api-config:${index}:${hashString(material)}`;
     }
 
+    function normalizeApiConfigSource(source) {
+        return String(source || '').trim().toLowerCase();
+    }
+
+    function looksLikeClaudeModel(model) {
+        return /^claude(?:[-_/]|$)/i.test(String(model || '').trim());
+    }
+
+    function looksLikeAnthropicUrl(url) {
+        const text = String(url || '').trim().toLowerCase();
+        if (!text) {
+            return false;
+        }
+
+        return text.includes('api.anthropic.com')
+            || /gateway\.ai\.cloudflare\.com\/v1\/[^/]+\/[^/]+\/anthropic(?:\/|$)/i.test(text)
+            || /\/anthropic(?:\/|$)/i.test(text);
+    }
+
+    function getApiConfigChatSource(config, apiUrl, model) {
+        const rawSource = normalizeApiConfigSource(config?.source);
+        if (rawSource === CHAT_SOURCE_CLAUDE || rawSource === 'anthropic') {
+            return CHAT_SOURCE_CLAUDE;
+        }
+        if (rawSource === CHAT_SOURCE_MAKERSUITE || rawSource === 'google' || rawSource === 'google-ai-studio') {
+            return CHAT_SOURCE_MAKERSUITE;
+        }
+        if (looksLikeClaudeModel(model) || looksLikeAnthropicUrl(apiUrl) || looksLikeAnthropicUrl(config?.reverseProxy)) {
+            return CHAT_SOURCE_CLAUDE;
+        }
+        return CHAT_SOURCE_CUSTOM;
+    }
+
+    function getChatSourceModelSettingKey(source) {
+        switch (source) {
+            case CHAT_SOURCE_CLAUDE:
+                return 'claude_model';
+            case CHAT_SOURCE_MAKERSUITE:
+                return 'google_model';
+            case CHAT_SOURCE_CUSTOM:
+                return 'custom_model';
+            default:
+                return `${source}_model`;
+        }
+    }
+
+    function getChatSourceModelSelector(source) {
+        switch (source) {
+            case CHAT_SOURCE_CLAUDE:
+                return '#model_claude_select';
+            case CHAT_SOURCE_MAKERSUITE:
+                return '#model_google_select';
+            case CHAT_SOURCE_CUSTOM:
+                return '#custom_model_id';
+            default:
+                return '';
+        }
+    }
+
+    function getChatSourceSecretKey(source) {
+        switch (source) {
+            case CHAT_SOURCE_CLAUDE:
+                return SECRET_KEY_CLAUDE;
+            case CHAT_SOURCE_MAKERSUITE:
+                return SECRET_KEY_MAKERSUITE;
+            case CHAT_SOURCE_CUSTOM:
+                return SECRET_KEY_CUSTOM;
+            default:
+                return '';
+        }
+    }
+
     function apiConfigToTargetProfile(config, index) {
-        const apiUrl = String(config?.customUrl || config?.url || '').trim();
+        const rawUrl = String(config?.customUrl || config?.url || '').trim();
+        const rawReverseProxy = String(config?.reverseProxy || '').trim();
         const model = String(config?.model || '').trim();
         const rawSource = String(config?.source || '').trim();
-        const secretId = String(config?.secretIds?.api_key_custom || config?.secretId || config?.keyId || '').trim();
+        const chatSource = getApiConfigChatSource(config, rawUrl || rawReverseProxy, model);
+        const secretKey = getChatSourceSecretKey(chatSource);
+        const secretIds = config?.secretIds && typeof config.secretIds === 'object' ? config.secretIds : {};
+        const legacySecretId = chatSource === CHAT_SOURCE_CUSTOM ? (config?.secretId || config?.keyId || '') : '';
+        const secretId = String(secretIds[secretKey] || legacySecretId).trim();
+        const apiUrl = chatSource === CHAT_SOURCE_CUSTOM ? rawUrl : '';
+        const reverseProxy = chatSource === CHAT_SOURCE_CUSTOM ? '' : (rawReverseProxy || rawUrl);
         const name = String(config?.name || `API 配置 ${index + 1}`).trim();
         return {
             id: makeApiTargetKeyFromApiConfig(config, index),
             mode: 'cc',
             exclude: ['preset', 'proxy'],
-            api: apiUrl ? 'custom' : (rawSource || 'custom'),
-            'main-api': apiUrl ? 'openai' : '',
-            'api-url-source': apiUrl ? 'custom' : '',
+            api: chatSource,
+            'main-api': MAIN_API_CHAT_COMPLETION,
+            'api-url-source': apiUrl ? CHAT_SOURCE_CUSTOM : '',
             'api-url': apiUrl,
+            'reverse-proxy': reverseProxy,
+            'proxy-password': String(config?.proxyPassword || '').trim(),
             model,
+            'model-setting': getChatSourceModelSettingKey(chatSource),
+            'secret-key': secretKey,
             proxy: '',
             'secret-id': secretId,
             name,
@@ -308,7 +398,7 @@
             return null;
         }
         const profile = apiConfigToTargetProfile(config, index);
-        if (!profile['api-url'] && !profile.model) {
+        if (!profile['api-url'] && !profile['reverse-proxy'] && !profile.model) {
             return null;
         }
         return {
@@ -371,7 +461,7 @@
             return '';
         }
 
-        const parts = [profile.rawSource || profile.api, profile['api-url'], profile.model]
+        const parts = [profile.rawSource || profile.api, profile['api-url'] || profile['reverse-proxy'], profile.model]
             .map(value => String(value ?? '').trim())
             .filter(Boolean);
         return parts.length ? parts.join(' / ') : 'API 设置';
@@ -384,7 +474,7 @@
         }
 
         const api = getProfileField(profile, 'api');
-        return api === 'custom' ? 'openai' : api;
+        return api === CHAT_SOURCE_CUSTOM ? MAIN_API_CHAT_COMPLETION : api;
     }
 
     function getProfileApiUrlSource(profile) {
@@ -447,43 +537,71 @@
         return true;
     }
 
-    async function syncCustomOpenAiFields(profile) {
-        if (getProfileField(profile, 'api') !== 'custom') {
+    async function syncChatCompletionFields(profile) {
+        if (getProfileMainApi(profile) !== MAIN_API_CHAT_COMPLETION) {
+            return;
+        }
+
+        const chatSource = getProfileField(profile, 'api') || getProfileApiUrlSource(profile);
+        if (!chatSource) {
             return;
         }
 
         const apiUrl = getProfileField(profile, 'api-url');
+        const reverseProxy = getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy');
+        const proxyPassword = getProfileField(profile, 'proxy-password');
         const model = getProfileField(profile, 'model');
+        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(chatSource);
+        const modelSelector = getChatSourceModelSelector(chatSource);
         const module = await getOpenAiModule();
 
-        const proxySelect = document.querySelector('#openai_proxy_preset');
-        if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
-            proxySelect.value = 'None';
-        }
-
-        setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
-        setElementValue('#openai_reverse_proxy', '');
-        setElementValue('#openai_proxy_password', '');
+        setElementValue('#chat_completion_source', chatSource);
         if (module?.oai_settings) {
-            module.oai_settings.chat_completion_source = 'custom';
-            module.oai_settings.reverse_proxy = '';
-            module.oai_settings.proxy_password = '';
+            module.oai_settings.chat_completion_source = chatSource;
         }
 
-        if (apiUrl) {
-            if (module?.oai_settings) {
-                module.oai_settings.custom_url = apiUrl;
-                module.oai_settings.reverse_proxy = '';
+        if (chatSource === CHAT_SOURCE_CUSTOM) {
+            const proxySelect = document.querySelector('#openai_proxy_preset');
+            if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
+                proxySelect.value = 'None';
             }
-            setElementValue('#custom_api_url_text', apiUrl);
+
+            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
             setElementValue('#openai_reverse_proxy', '');
+            setElementValue('#openai_proxy_password', '');
+            if (module?.oai_settings) {
+                module.oai_settings.reverse_proxy = '';
+                module.oai_settings.proxy_password = '';
+            }
+
+            if (apiUrl) {
+                if (module?.oai_settings) {
+                    module.oai_settings.custom_url = apiUrl;
+                }
+                setElementValue('#custom_api_url_text', apiUrl);
+            }
+        } else if (reverseProxy || proxyPassword) {
+            const proxySelect = document.querySelector('#openai_proxy_preset');
+            if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
+                proxySelect.value = 'None';
+            }
+
+            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
+            setElementValue('#openai_reverse_proxy', reverseProxy);
+            setElementValue('#openai_proxy_password', proxyPassword);
+            if (module?.oai_settings) {
+                module.oai_settings.reverse_proxy = reverseProxy;
+                module.oai_settings.proxy_password = proxyPassword;
+            }
         }
 
         if (model) {
             if (module?.oai_settings) {
-                module.oai_settings.custom_model = model;
+                module.oai_settings[modelSetting] = model;
             }
-            setElementValue('#custom_model_id', model);
+            if (modelSelector) {
+                setElementValue(modelSelector, model);
+            }
         }
     }
 
@@ -497,6 +615,7 @@
         const apiUrl = getProfileField(profile, 'api-url');
         const model = getProfileField(profile, 'model');
         const secretId = getProfileField(profile, 'secret-id');
+        const secretKey = getProfileField(profile, 'secret-key');
 
         state.apiSwitching = true;
         suppressProfileRestore(7000);
@@ -507,7 +626,9 @@
                 await runSlashCommand(`/api quiet=true ${quoteSlashArg(mainApi)}`);
             }
 
-            if (apiUrl) {
+            await syncChatCompletionFields(profile);
+
+            if (apiUrl && getProfileField(profile, 'api') === CHAT_SOURCE_CUSTOM) {
                 const apiArg = apiUrlSource ? ` api=${quoteSlashArg(apiUrlSource)}` : '';
                 await runSlashCommand(`/api-url${apiArg} connect=false quiet=true ${quoteSlashArg(apiUrl)}`);
             }
@@ -516,10 +637,9 @@
                 await runSlashCommand(`/model quiet=true ${quoteSlashArg(model)}`);
             }
 
-            await syncCustomOpenAiFields(profile);
-
             if (secretId) {
-                await runSlashCommand(`/secret-id quiet=true ${quoteSlashArg(secretId)}`);
+                const keyArg = secretKey ? ` key=${quoteSlashArg(secretKey)}` : '';
+                await runSlashCommand(`/secret-id${keyArg} quiet=true ${quoteSlashArg(secretId)}`);
             }
 
             if (markConnectionManager) {
@@ -613,8 +733,10 @@
         const mainApi = getProfileMainApi(profile);
         const apiUrlSource = getProfileApiUrlSource(profile);
         const apiUrl = getProfileField(profile, 'api-url');
+        const reverseProxy = getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy');
+        const proxyPassword = getProfileField(profile, 'proxy-password');
         const model = getProfileField(profile, 'model');
-        const proxy = getProfileField(profile, 'proxy');
+        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(api);
         const openAiModule = await getOpenAiModule();
         const coreModule = await getCoreModule();
         const oai = openAiModule?.oai_settings;
@@ -626,17 +748,28 @@
             return false;
         }
 
-        if (api === 'custom') {
-            if (oai.chat_completion_source !== apiUrlSource) {
+        if (mainApi === MAIN_API_CHAT_COMPLETION && api) {
+            if (oai.chat_completion_source !== api) {
                 return false;
             }
-            if (apiUrl && oai.custom_url !== apiUrl) {
+
+            if (api === CHAT_SOURCE_CUSTOM && apiUrl && oai.custom_url !== apiUrl) {
                 return false;
             }
-            if (model && oai.custom_model !== model) {
+
+            if (api !== CHAT_SOURCE_CUSTOM && reverseProxy && oai.reverse_proxy !== reverseProxy) {
                 return false;
             }
-            if (!proxy && (oai.reverse_proxy || oai.proxy_password)) {
+
+            if (proxyPassword && oai.proxy_password !== proxyPassword) {
+                return false;
+            }
+
+            if (model && modelSetting && String(oai[modelSetting] || '') !== model) {
+                return false;
+            }
+
+            if (api === CHAT_SOURCE_CUSTOM && !reverseProxy && (oai.reverse_proxy || oai.proxy_password)) {
                 return false;
             }
         }
