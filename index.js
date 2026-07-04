@@ -24,6 +24,8 @@
         ballY: null,
         decouplePresetConnection: true,
         lockApiProfile: true,
+        activeApiTargetKey: '',
+        activeApiTargetName: '',
         lockedProfile: '',
         lockedProfileKey: '',
     });
@@ -40,8 +42,8 @@
         initialized: false,
         toolsOpen: false,
         mode: 'search',
-        currentProfile: '',
-        currentProfileKey: '',
+        currentApiTarget: '',
+        currentApiTargetKey: '',
         searchToken: 0,
         jumpToken: 0,
         apiSwitching: false,
@@ -244,7 +246,12 @@
         return Math.abs(hash).toString(36);
     }
 
-    function makeApiConfigKey(config, index) {
+    function makeApiTargetKeyFromApiConfig(config, index) {
+        const explicitId = String(config?.id || config?.uuid || config?.key || '').trim();
+        if (explicitId) {
+            return `api-config:${explicitId}`;
+        }
+
         const material = [
             config?.name,
             config?.source,
@@ -255,28 +262,31 @@
         return `api-config:${index}:${hashString(material)}`;
     }
 
-    function apiConfigToProfile(config, index) {
+    function apiConfigToTargetProfile(config, index) {
         const apiUrl = String(config?.customUrl || config?.url || '').trim();
         const model = String(config?.model || '').trim();
-        const source = String(config?.source || 'custom').trim() || 'custom';
+        const rawSource = String(config?.source || '').trim();
         const secretId = String(config?.secretIds?.api_key_custom || config?.secretId || config?.keyId || '').trim();
         const name = String(config?.name || `API 配置 ${index + 1}`).trim();
         return {
-            id: makeApiConfigKey(config, index),
+            id: makeApiTargetKeyFromApiConfig(config, index),
             mode: 'cc',
             exclude: ['preset', 'proxy'],
-            api: source,
+            api: apiUrl ? 'custom' : (rawSource || 'custom'),
+            'main-api': apiUrl ? 'openai' : '',
+            'api-url-source': apiUrl ? 'custom' : '',
             'api-url': apiUrl,
             model,
             proxy: '',
             'secret-id': secretId,
             name,
             source: API_CONFIG_MANAGER_KEY,
+            rawSource,
             group: String(config?.group || '').trim(),
         };
     }
 
-    function connectionProfileToEntry(profile) {
+    function connectionProfileToApiTarget(profile) {
         if (!profile?.id || !profile?.name) {
             return null;
         }
@@ -289,14 +299,15 @@
             displayName: profile.name,
             group: '',
             profile: clonePlainObject(profile),
+            ownsConnectionProfile: true,
         };
     }
 
-    function apiConfigToEntry(config, index) {
+    function apiConfigToApiTarget(config, index) {
         if (!config || typeof config !== 'object') {
             return null;
         }
-        const profile = apiConfigToProfile(config, index);
+        const profile = apiConfigToTargetProfile(config, index);
         if (!profile['api-url'] && !profile.model) {
             return null;
         }
@@ -309,29 +320,26 @@
             displayName: profile.name,
             group: profile.group,
             profile,
+            ownsConnectionProfile: false,
         };
     }
 
-    function getProfileEntries() {
+    function getApiTargetEntries() {
         const connectionEntries = getConnectionProfilesRaw()
-            .map(connectionProfileToEntry)
+            .map(connectionProfileToApiTarget)
             .filter(Boolean);
         const apiConfigEntries = getApiConfigRecordsRaw()
-            .map(apiConfigToEntry)
+            .map(apiConfigToApiTarget)
             .filter(Boolean);
         return [...connectionEntries, ...apiConfigEntries];
     }
 
-    function findProfileEntry(value = '') {
+    function findApiTargetEntry(value = '') {
         const search = String(value ?? '');
         const trimmed = search.trim();
-        const entries = getProfileEntries();
+        const entries = getApiTargetEntries();
         if (!search && !trimmed) {
-            const store = getConnectionManagerStore();
-            if (store?.selectedProfile) {
-                return entries.find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
-            }
-            return null;
+            return getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
         }
 
         return entries.find(entry =>
@@ -344,12 +352,12 @@
             || String(entry.name || '').trim() === trimmed) || null;
     }
 
-    function getProfileEntryByKey(key) {
-        return getProfileEntries().find(entry => entry.key === key) || null;
+    function getApiTargetEntryByKey(key) {
+        return getApiTargetEntries().find(entry => entry.key === key) || null;
     }
 
     async function getConnectionProfileDetails(value = '') {
-        const entry = findProfileEntry(value);
+        const entry = findApiTargetEntry(value);
         if (entry?.profile) {
             return clonePlainObject(entry.profile);
         }
@@ -358,15 +366,29 @@
         return parseJsonObject(await runSlashCommand(command));
     }
 
-    function describeConnectionProfile(profile) {
+    function describeApiTargetProfile(profile) {
         if (!profile) {
             return '';
         }
 
-        const parts = [profile.api, profile['api-url'], profile.model]
+        const parts = [profile.rawSource || profile.api, profile['api-url'], profile.model]
             .map(value => String(value ?? '').trim())
             .filter(Boolean);
         return parts.length ? parts.join(' / ') : 'API 设置';
+    }
+
+    function getProfileMainApi(profile) {
+        const explicit = getProfileField(profile, 'main-api');
+        if (explicit) {
+            return explicit;
+        }
+
+        const api = getProfileField(profile, 'api');
+        return api === 'custom' ? 'openai' : api;
+    }
+
+    function getProfileApiUrlSource(profile) {
+        return getProfileField(profile, 'api-url-source') || getProfileField(profile, 'api');
     }
 
     async function emitConnectionProfileLoaded(profile) {
@@ -443,6 +465,7 @@
         setElementValue('#openai_reverse_proxy', '');
         setElementValue('#openai_proxy_password', '');
         if (module?.oai_settings) {
+            module.oai_settings.chat_completion_source = 'custom';
             module.oai_settings.reverse_proxy = '';
             module.oai_settings.proxy_password = '';
         }
@@ -464,12 +487,13 @@
         }
     }
 
-    async function applyConnectionProfileFields(profile, { markConnectionManager = true } = {}) {
+    async function applyApiTargetProfile(profile, { markConnectionManager = false } = {}) {
         if (!profile) {
             return '';
         }
 
-        const api = getProfileField(profile, 'api');
+        const mainApi = getProfileMainApi(profile);
+        const apiUrlSource = getProfileApiUrlSource(profile);
         const apiUrl = getProfileField(profile, 'api-url');
         const model = getProfileField(profile, 'model');
         const secretId = getProfileField(profile, 'secret-id');
@@ -479,12 +503,12 @@
         try {
             await enforcePresetConnectionDecouple();
 
-            if (api) {
-                await runSlashCommand(`/api quiet=true ${quoteSlashArg(api)}`);
+            if (mainApi) {
+                await runSlashCommand(`/api quiet=true ${quoteSlashArg(mainApi)}`);
             }
 
             if (apiUrl) {
-                const apiArg = api ? ` api=${quoteSlashArg(api)}` : '';
+                const apiArg = apiUrlSource ? ` api=${quoteSlashArg(apiUrlSource)}` : '';
                 await runSlashCommand(`/api-url${apiArg} connect=false quiet=true ${quoteSlashArg(apiUrl)}`);
             }
 
@@ -513,66 +537,81 @@
     }
 
     async function applyConnectionProfileByName(name) {
-        const entry = findProfileEntry(name);
+        const entry = findApiTargetEntry(name);
         const profile = entry?.profile || await getConnectionProfileDetails(name);
         if (!profile) {
             globalThis.toastr?.warning?.(`没有找到连接配置：${name}`, 'SillyTavern Tool Ball');
             return '';
         }
-        return applyConnectionProfileFields(profile, { markConnectionManager: entry?.source !== API_CONFIG_MANAGER_KEY });
+        return applyApiTargetProfile(profile, { markConnectionManager: entry ? Boolean(entry.ownsConnectionProfile) : true });
     }
 
-    async function applyProfileEntry(entry) {
+    async function applyApiTargetEntry(entry) {
         if (!entry?.profile) {
             return '';
         }
 
-        return applyConnectionProfileFields(entry.profile, {
-            markConnectionManager: entry.source !== API_CONFIG_MANAGER_KEY,
+        return applyApiTargetProfile(entry.profile, {
+            markConnectionManager: Boolean(entry.ownsConnectionProfile),
         });
     }
 
-    function setCurrentProfileEntry(entry) {
-        state.currentProfileKey = entry?.key || '';
-        state.currentProfile = entry?.displayName || entry?.name || '';
+    function setCurrentApiTargetEntry(entry) {
+        state.currentApiTargetKey = entry?.key || '';
+        state.currentApiTarget = entry?.displayName || entry?.name || '';
         updateToolBallTitle();
     }
 
-    function getSelectedConnectionProfileEntry() {
+    function getSelectedConnectionProfileTarget() {
         const store = getConnectionManagerStore();
         if (!store?.selectedProfile) {
             return null;
         }
-        return getProfileEntries().find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
+        return getApiTargetEntries().find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
     }
 
-    function getLockedProfileEntry() {
+    function getActiveApiTargetEntry() {
         const settings = getSettings();
-        let entry = settings.lockedProfileKey ? getProfileEntryByKey(settings.lockedProfileKey) : null;
-        if (!entry && settings.lockedProfile) {
-            entry = findProfileEntry(settings.lockedProfile);
-            if (entry) {
-                settings.lockedProfileKey = entry.key;
-                settings.lockedProfile = entry.name;
-                saveSettings();
-            }
+        let entry = settings.activeApiTargetKey ? getApiTargetEntryByKey(settings.activeApiTargetKey) : null;
+        if (!entry && settings.activeApiTargetName) {
+            entry = findApiTargetEntry(settings.activeApiTargetName);
         }
+
+        if (!entry && settings.lockedProfileKey) {
+            entry = getApiTargetEntryByKey(settings.lockedProfileKey);
+        }
+        if (!entry && settings.lockedProfile) {
+            entry = findApiTargetEntry(settings.lockedProfile);
+        }
+
+        if (entry && settings.activeApiTargetKey !== entry.key) {
+            settings.activeApiTargetKey = entry.key;
+            settings.activeApiTargetName = entry.name;
+            settings.lockedProfileKey = entry.key;
+            settings.lockedProfile = entry.name;
+            saveSettings();
+        }
+
         return entry;
     }
 
-    function setLockedProfileEntry(entry) {
+    function setActiveApiTargetEntry(entry) {
         const settings = getSettings();
-        settings.lockedProfileKey = entry?.key || '';
-        settings.lockedProfile = entry?.name || '';
+        settings.activeApiTargetKey = entry?.key || '';
+        settings.activeApiTargetName = entry?.name || '';
+        settings.lockedProfileKey = settings.activeApiTargetKey;
+        settings.lockedProfile = settings.activeApiTargetName;
         saveSettings();
     }
 
-    async function profileMatchesNativeState(profile) {
+    async function activeTargetMatchesNativeState(profile) {
         if (!profile) {
             return false;
         }
 
         const api = getProfileField(profile, 'api');
+        const mainApi = getProfileMainApi(profile);
+        const apiUrlSource = getProfileApiUrlSource(profile);
         const apiUrl = getProfileField(profile, 'api-url');
         const model = getProfileField(profile, 'model');
         const proxy = getProfileField(profile, 'proxy');
@@ -583,11 +622,12 @@
             return false;
         }
 
+        if (mainApi && coreModule?.main_api && coreModule.main_api !== mainApi) {
+            return false;
+        }
+
         if (api === 'custom') {
-            if (coreModule?.main_api && coreModule.main_api !== 'openai') {
-                return false;
-            }
-            if (oai.chat_completion_source !== 'custom') {
+            if (oai.chat_completion_source !== apiUrlSource) {
                 return false;
             }
             if (apiUrl && oai.custom_url !== apiUrl) {
@@ -778,8 +818,8 @@
         return { available: true, changed: true };
     }
 
-    async function setLockedProfileToCurrent({ notify = false } = {}) {
-        const current = getSelectedConnectionProfileEntry() || getLockedProfileEntry();
+    async function setActiveApiTargetToCurrent({ notify = false } = {}) {
+        const current = getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
         if (!current) {
             if (notify) {
                 globalThis.toastr?.warning?.('没有读取到当前 Connection Profile。请先在酒馆里保存一个连接配置。', 'SillyTavern Tool Ball');
@@ -788,8 +828,8 @@
         }
 
         getSettings().lockApiProfile = true;
-        setLockedProfileEntry(current);
-        setCurrentProfileEntry(current);
+        setActiveApiTargetEntry(current);
+        setCurrentApiTargetEntry(current);
 
         if (notify) {
             globalThis.toastr?.success?.(`已锁定当前 API 配置：${current.displayName || current.name}`, 'SillyTavern Tool Ball');
@@ -798,13 +838,13 @@
         return current.name;
     }
 
-    async function seedLockedProfileIfNeeded() {
+    async function seedActiveApiTargetIfNeeded() {
         const settings = getSettings();
-        const lockedEntry = getLockedProfileEntry();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || lockedEntry) {
-            return lockedEntry?.name || '';
+        const activeEntry = getActiveApiTargetEntry();
+        if (!settings.decouplePresetConnection || !settings.lockApiProfile || activeEntry) {
+            return activeEntry?.name || '';
         }
-        return setLockedProfileToCurrent({ notify: false });
+        return setActiveApiTargetToCurrent({ notify: false });
     }
 
     function suppressProfileRestore(durationMs = 1800) {
@@ -815,10 +855,10 @@
         return Date.now() < state.suppressProfileRestoreUntil;
     }
 
-    async function restoreLockedProfileIfNeeded(reason = 'preset changed') {
+    async function restoreActiveApiTargetIfNeeded(reason = 'preset changed') {
         const settings = getSettings();
-        const lockedEntry = getLockedProfileEntry();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || !lockedEntry) {
+        const activeEntry = getActiveApiTargetEntry();
+        if (!settings.decouplePresetConnection || !settings.lockApiProfile || !activeEntry) {
             return;
         }
         if (isProfileRestoreSuppressed()) {
@@ -827,37 +867,37 @@
 
         await enforcePresetConnectionDecouple();
 
-        if (state.currentProfileKey === lockedEntry.key && await profileMatchesNativeState(lockedEntry.profile)) {
+        if (state.currentApiTargetKey === activeEntry.key && await activeTargetMatchesNativeState(activeEntry.profile)) {
             return;
         }
 
         suppressProfileRestore(7000);
-        await applyProfileEntry(lockedEntry);
-        setCurrentProfileEntry(lockedEntry);
+        await applyApiTargetEntry(activeEntry);
+        setCurrentApiTargetEntry(activeEntry);
 
         if (state.toolsOpen) {
             renderToolPanel();
         }
 
-        console.info(`[Chat Search Jump] Restored locked profile after ${reason}:`, lockedEntry.name);
-        globalThis.toastr?.info?.(`已保持 API 配置：${lockedEntry.displayName || lockedEntry.name}`, 'SillyTavern Tool Ball');
+        console.info(`[Chat Search Jump] Restored active API target after ${reason}:`, activeEntry.name);
+        globalThis.toastr?.info?.(`已保持 API 配置：${activeEntry.displayName || activeEntry.name}`, 'SillyTavern Tool Ball');
     }
 
-    async function syncLockedProfileToCurrent(reason = 'manual API changed') {
+    async function syncActiveApiTargetToNativeSelection(reason = 'manual API changed') {
         const settings = getSettings();
         if (!settings.decouplePresetConnection || !settings.lockApiProfile || state.apiSwitching) {
             return;
         }
 
-        const current = getSelectedConnectionProfileEntry();
+        const current = getSelectedConnectionProfileTarget();
         if (!current) {
             return;
         }
 
-        setCurrentProfileEntry(current);
-        if (settings.lockedProfileKey !== current.key) {
-            setLockedProfileEntry(current);
-            console.info(`[Chat Search Jump] Updated hidden API lock after ${reason}:`, current.name);
+        setCurrentApiTargetEntry(current);
+        if (settings.activeApiTargetKey !== current.key) {
+            setActiveApiTargetEntry(current);
+            console.info(`[Chat Search Jump] Updated active API target after ${reason}:`, current.name);
         }
 
         if (state.toolsOpen) {
@@ -865,20 +905,20 @@
         }
     }
 
-    function scheduleLockedProfileSync(reason = 'manual API changed') {
+    function scheduleActiveApiTargetSync(reason = 'manual API changed') {
         clearTimeout(state.profileSyncTimer);
         state.profileSyncTimer = setTimeout(() => {
-            syncLockedProfileToCurrent(reason).catch(error => {
-                console.warn('[Chat Search Jump] Failed to update hidden API lock.', error);
+            syncActiveApiTargetToNativeSelection(reason).catch(error => {
+                console.warn('[Chat Search Jump] Failed to update active API target.', error);
             });
         }, 500);
     }
 
-    function scheduleLockedProfileRestore(reason = 'preset changed') {
+    function scheduleActiveApiTargetRestore(reason = 'preset changed') {
         clearTimeout(state.profileRestoreTimer);
         state.profileRestoreTimer = setTimeout(() => {
-            restoreLockedProfileIfNeeded(reason).catch(error => {
-                console.warn('[Chat Search Jump] Failed to restore locked profile.', error);
+            restoreActiveApiTargetIfNeeded(reason).catch(error => {
+                console.warn('[Chat Search Jump] Failed to restore active API target.', error);
             });
         }, 450);
     }
@@ -926,7 +966,7 @@
         if (state.apiSwitching) {
             return;
         }
-        scheduleLockedProfileRestore('preset changed');
+        scheduleActiveApiTargetRestore('preset changed');
     }
 
     function handleMainApiChangedForApiGuard() {
@@ -935,11 +975,11 @@
         }
 
         if (Date.now() < state.presetGuardActiveUntil) {
-            scheduleLockedProfileRestore('API changed during preset change');
+            scheduleActiveApiTargetRestore('API changed during preset change');
             return;
         }
 
-        scheduleLockedProfileSync('manual API changed');
+        scheduleActiveApiTargetSync('manual API changed');
     }
 
     function stripHtml(value) {
@@ -1647,21 +1687,21 @@
 
     async function renderToolPanel() {
         renderToolPanelLoading();
-        const entries = getProfileEntries();
-        const currentEntry = getLockedProfileEntry() || getSelectedConnectionProfileEntry();
+        await seedActiveApiTargetIfNeeded();
+        const entries = getApiTargetEntries();
+        const currentEntry = getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
         if (!state.toolsOpen) {
             return;
         }
 
-        setCurrentProfileEntry(currentEntry);
-        const currentLabel = state.currentProfile;
+        setCurrentApiTargetEntry(currentEntry);
+        const currentLabel = state.currentApiTarget;
 
         const settings = getSettings();
         applyOfficialPresetConnectionDecouple();
-        await seedLockedProfileIfNeeded();
         const profileHtml = entries.length
             ? entries.map(entry => {
-                const active = entry.key === state.currentProfileKey;
+                const active = entry.key === state.currentApiTargetKey;
                 const meta = [entry.sourceLabel, entry.group].filter(Boolean).join(' · ');
                 return `
                     <button type="button" class="stcsj-profile-item${active ? ' active' : ''}" data-profile-key="${escapeHtml(entry.key)}">
@@ -1695,7 +1735,7 @@
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
             item.addEventListener('click', async () => {
                 const key = item.getAttribute('data-profile-key');
-                const entry = key ? getProfileEntryByKey(key) : null;
+                const entry = key ? getApiTargetEntryByKey(key) : null;
                 if (!entry) {
                     closeToolPanel();
                     return;
@@ -1703,11 +1743,15 @@
 
                 item.classList.add('loading');
                 suppressProfileRestore(5000);
-                await applyProfileEntry(entry);
-                setCurrentProfileEntry(entry);
-                globalThis.toastr?.success?.(`已切换连接：${entry.displayName || entry.name}（${describeConnectionProfile(entry.profile)}）`, 'SillyTavern Tool Ball');
-                if (getSettings().lockApiProfile) {
-                    setLockedProfileEntry(entry);
+                try {
+                    await applyApiTargetEntry(entry);
+                    setActiveApiTargetEntry(entry);
+                    setCurrentApiTargetEntry(entry);
+                    globalThis.toastr?.success?.(`已切换连接：${entry.displayName || entry.name}（${describeApiTargetProfile(entry.profile)}）`, 'SillyTavern Tool Ball');
+                } catch (error) {
+                    console.warn('[Chat Search Jump] Failed to switch API target.', error);
+                    globalThis.toastr?.error?.(`切换失败：${entry.displayName || entry.name}`, 'SillyTavern Tool Ball');
+                    return;
                 }
                 closeToolPanel();
             });
@@ -2317,8 +2361,8 @@
             return;
         }
         const parts = ['酒馆工具'];
-        if (state.currentProfile) {
-            parts.push(`当前 API：${state.currentProfile}`);
+        if (state.currentApiTarget) {
+            parts.push(`当前 API：${state.currentApiTarget}`);
         }
         elements.toggle.title = parts.join('｜');
     }
@@ -2733,7 +2777,7 @@
         on('PRESET_CHANGED', handlePresetChangedForApiGuard);
         on('SETTINGS_UPDATED', () => enforcePresetConnectionDecouple({ notify: false }));
         on('MAIN_API_CHANGED', handleMainApiChangedForApiGuard);
-        on('GENERATION_STARTED', () => restoreLockedProfileIfNeeded('generation started'));
+        on('GENERATION_STARTED', () => restoreActiveApiTargetIfNeeded('generation started'));
     }
 
     function init() {
@@ -2746,9 +2790,9 @@
         subscribeToEvents();
 
         Promise.resolve().then(async () => {
-            setCurrentProfileEntry(getLockedProfileEntry() || getSelectedConnectionProfileEntry());
+            await seedActiveApiTargetIfNeeded();
+            setCurrentApiTargetEntry(getActiveApiTargetEntry() || getSelectedConnectionProfileTarget());
             await enforcePresetConnectionDecouple({ notify: false });
-            await seedLockedProfileIfNeeded();
             updateToolBallTitle();
         }).catch(error => {
             console.warn('[Chat Search Jump] Failed to initialize API guard.', error);
@@ -2761,8 +2805,8 @@
         }, API_GUARD_ENFORCE_MS);
 
         window.setInterval(async () => {
-            await restoreLockedProfileIfNeeded('periodic check');
-            setCurrentProfileEntry(getLockedProfileEntry() || getSelectedConnectionProfileEntry());
+            await restoreActiveApiTargetIfNeeded('periodic check');
+            setCurrentApiTargetEntry(getActiveApiTargetEntry() || getSelectedConnectionProfileTarget());
         }, PROFILE_LOCK_POLL_MS);
 
         console.info('[Chat Search Jump] loaded');

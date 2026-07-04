@@ -2,6 +2,13 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.15
+
+- 重构 API 切换核心：新增插件自己的 `activeApiTargetKey`，当前 API 不再由 SillyTavern 官方 `selectedProfile` 决定。
+- API 管理器记录和官方 Connection Profile 都转换成 `ApiTarget`，但不再互相伪装；点击 API 管理器记录不会改官方 selectedProfile。
+- 自定义 URL 的 API 管理器记录统一走 Chat Completion 主 API + `custom` URL 源，避免把 `cf` / 分组名当成 `/api` 命令导致切换失败后回跳旧 Profile。
+- 后台守护恢复的是当前 `ApiTarget`，不是旧的 `lockedProfileKey`；旧字段仅用于一次性迁移兼容。
+
 ## v0.5.14
 
 - 悬浮球 API 列表直接读取 `api-config-manager.configs`，API 管理器里的记录会作为可点击连接项出现，不需要再手动创建一份 Connection Profile。
