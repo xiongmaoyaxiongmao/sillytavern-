@@ -2,6 +2,11 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.6.2
+
+- API 切换器在写入 Chat Completion 来源、URL、模型和 secret-id 后会触发连接按钮，不再停留在“只跳到设置页但未连接”的状态。
+- 非 Chat Completion 目标仍保留原来的状态重置逻辑，避免无对应连接按钮时误报已连接。
+
 ## v0.6.1
 
 - API 管理器记录不再根据 `claude-*` 模型名、Anthropic URL、Cloudflare Anthropic 网关路径自动改成 Claude source。

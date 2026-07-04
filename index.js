@@ -863,7 +863,11 @@
             }
             await enforcePresetConnectionDecouple();
             await saveNativeSettingsNow();
-            await resetNativeConnectionStatus('connection profile switched');
+            if (mainApi === MAIN_API_CHAT_COMPLETION) {
+                triggerChatCompletionConnection();
+            } else {
+                await resetNativeConnectionStatus('connection profile switched');
+            }
             return profile.name || '';
         } finally {
             setTimeout(() => {
@@ -1137,6 +1141,15 @@
         } catch (error) {
             console.warn('[Chat Search Jump] Failed to reset native connection status.', error);
         }
+    }
+
+    function triggerChatCompletionConnection() {
+        const button = document.querySelector('#api_button_openai');
+        if (!button) {
+            throw new Error('未找到 API 连接按钮，请在 OpenAI/Chat Completions 设置页使用此扩展');
+        }
+
+        button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     }
 
     async function setNativePresetConnectionBind(enabled) {
