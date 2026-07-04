@@ -2,6 +2,14 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.6.0
+
+- 重做悬浮球里的 API 切换器：API 管理器记录优先展示，并按 SillyTavern 的 Chat Completion Source 打标签，例如 OpenRouter、Groq、DeepSeek、Claude / Anthropic、Custom (OpenAI兼容)。
+- 特殊渠道不再被压成 Custom OpenAI：只要配置记录里的 `source` 不是 `custom`，切换时就写入对应的 `chat_completion_source`，密钥、模型字段也跟随具体渠道。
+- endpoint 写入按配置字段执行：Custom 写 `custom_url`，支持反代的来源才写显式 `reverseProxy`；SiliconFlow、Minimax、Z.ai、Azure OpenAI、Workers AI 这类来源会写入对应的专用 endpoint 字段。
+- 工具入口收敛为一个“搜索 / 收藏”二合一面板：仍可在当前聊天按文字搜索记录、跳转命中楼层、收藏消息和查看前后快照。
+- API 守护现在监听 Chat Completion Source 变化，手动改来源后会优先匹配 API 管理器记录，再回落到 Connection Profile。
+
 ## v0.5.16
 
 - API 管理器记录现在会先归一化为真实 Chat Completion 目标：`custom`、`claude`、`makersuite`，不再把所有 URL 都压成 Custom OpenAI。

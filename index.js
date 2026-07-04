@@ -10,9 +10,101 @@
     const CHAT_SOURCE_CLAUDE = 'claude';
     const CHAT_SOURCE_MAKERSUITE = 'makersuite';
     const MAIN_API_CHAT_COMPLETION = 'openai';
-    const SECRET_KEY_CUSTOM = 'api_key_custom';
-    const SECRET_KEY_CLAUDE = 'api_key_claude';
-    const SECRET_KEY_MAKERSUITE = 'api_key_makersuite';
+    const CHAT_SOURCE_ALIASES = Object.freeze({
+        anthropic: CHAT_SOURCE_CLAUDE,
+        google: CHAT_SOURCE_MAKERSUITE,
+        'google-ai-studio': CHAT_SOURCE_MAKERSUITE,
+        google_ai_studio: CHAT_SOURCE_MAKERSUITE,
+        gemini: CHAT_SOURCE_MAKERSUITE,
+    });
+    const CHAT_SOURCE_LABELS = Object.freeze({
+        openai: 'OpenAI',
+        [CHAT_SOURCE_CLAUDE]: 'Claude / Anthropic',
+        openrouter: 'OpenRouter',
+        ai21: 'AI21',
+        [CHAT_SOURCE_MAKERSUITE]: 'Google AI Studio',
+        vertexai: 'Vertex AI',
+        mistralai: 'Mistral AI',
+        [CHAT_SOURCE_CUSTOM]: 'Custom (OpenAI兼容)',
+        cohere: 'Cohere',
+        perplexity: 'Perplexity',
+        groq: 'Groq',
+        electronhub: 'ElectronHub',
+        chutes: 'Chutes',
+        nanogpt: 'NanoGPT',
+        deepseek: 'DeepSeek',
+        aimlapi: 'AI/ML API',
+        xai: 'xAI',
+        pollinations: 'Pollinations',
+        moonshot: 'Moonshot',
+        fireworks: 'Fireworks',
+        cometapi: 'CometAPI',
+        azure_openai: 'Azure OpenAI',
+        zai: 'Z.ai',
+        siliconflow: 'SiliconFlow',
+        workers_ai: 'Cloudflare Workers AI',
+        minimax: 'Minimax',
+    });
+    const CHAT_SOURCE_MODEL_SETTING_OVERRIDES = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: 'custom_model',
+        [CHAT_SOURCE_MAKERSUITE]: 'google_model',
+        azure_openai: 'azure_openai_model',
+        workers_ai: 'workers_ai_model',
+    });
+    const CHAT_SOURCE_MODEL_SELECTOR_OVERRIDES = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: '#custom_model_id',
+        [CHAT_SOURCE_MAKERSUITE]: '#model_google_select',
+        azure_openai: '#azure_openai_model',
+        workers_ai: '#model_workers_ai_select',
+    });
+    const CHAT_SOURCE_REVERSE_PROXY_SOURCES = new Set([
+        'openai',
+        CHAT_SOURCE_CLAUDE,
+        CHAT_SOURCE_MAKERSUITE,
+        'vertexai',
+        'mistralai',
+        'deepseek',
+        'xai',
+        'moonshot',
+        'zai',
+    ]);
+    const REVERSE_PROXY_ENDPOINT_FIELD = Object.freeze({
+        setting: 'reverse_proxy',
+        selector: '#openai_reverse_proxy',
+        profileField: 'reverse-proxy',
+    });
+    const CHAT_SOURCE_ENDPOINT_FIELDS = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: {
+            setting: 'custom_url',
+            selector: '#custom_api_url_text',
+            profileField: 'api-url',
+        },
+        siliconflow: {
+            setting: 'siliconflow_endpoint',
+            selector: '#siliconflow_endpoint',
+            profileField: 'endpoint-value',
+        },
+        minimax: {
+            setting: 'minimax_endpoint',
+            selector: '#minimax_endpoint',
+            profileField: 'endpoint-value',
+        },
+        zai: {
+            setting: 'zai_endpoint',
+            selector: '#zai_endpoint',
+            profileField: 'endpoint-value',
+        },
+        azure_openai: {
+            setting: 'azure_base_url',
+            selector: '#azure_base_url',
+            profileField: 'endpoint-value',
+        },
+        workers_ai: {
+            setting: 'workers_ai_account_id',
+            selector: '#workers_ai_account_id',
+            profileField: 'endpoint-value',
+        },
+    });
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
     const API_GUARD_ENFORCE_MS = 2500;
@@ -262,15 +354,43 @@
         const material = [
             config?.name,
             config?.source,
-            config?.customUrl || config?.url || config?.reverseProxy,
+            config?.customUrl || config?.url || config?.reverseProxy || config?.endpoint || config?.baseUrl,
             config?.model,
-            config?.secretIds?.api_key_custom || config?.secretIds?.api_key_claude || config?.secretIds?.api_key_makersuite,
+            JSON.stringify(config?.secretIds || {}),
         ].join('|');
         return `api-config:${index}:${hashString(material)}`;
     }
 
     function normalizeApiConfigSource(source) {
-        return String(source || '').trim().toLowerCase();
+        const normalized = String(source || '').trim().toLowerCase();
+        return CHAT_SOURCE_ALIASES[normalized] || normalized;
+    }
+
+    function getFirstString(...values) {
+        for (const value of values) {
+            const text = String(value ?? '').trim();
+            if (text) {
+                return text;
+            }
+        }
+        return '';
+    }
+
+    function toCamelSource(source) {
+        return String(source || '').replace(/_([a-z])/g, (_, char) => char.toUpperCase());
+    }
+
+    function getChatSourceLabel(source) {
+        const normalized = normalizeApiConfigSource(source);
+        if (!normalized) {
+            return '';
+        }
+        return CHAT_SOURCE_LABELS[normalized] || normalized;
+    }
+
+    function isChatCompletionSource(source) {
+        const normalized = normalizeApiConfigSource(source);
+        return normalized === CHAT_SOURCE_CUSTOM || hasOwn(CHAT_SOURCE_LABELS, normalized);
     }
 
     function looksLikeClaudeModel(model) {
@@ -290,11 +410,8 @@
 
     function getApiConfigChatSource(config, apiUrl, model) {
         const rawSource = normalizeApiConfigSource(config?.source);
-        if (rawSource === CHAT_SOURCE_CLAUDE || rawSource === 'anthropic') {
-            return CHAT_SOURCE_CLAUDE;
-        }
-        if (rawSource === CHAT_SOURCE_MAKERSUITE || rawSource === 'google' || rawSource === 'google-ai-studio') {
-            return CHAT_SOURCE_MAKERSUITE;
+        if (rawSource && rawSource !== CHAT_SOURCE_CUSTOM) {
+            return rawSource;
         }
         if (looksLikeClaudeModel(model) || looksLikeAnthropicUrl(apiUrl) || looksLikeAnthropicUrl(config?.reverseProxy)) {
             return CHAT_SOURCE_CLAUDE;
@@ -303,56 +420,96 @@
     }
 
     function getChatSourceModelSettingKey(source) {
-        switch (source) {
-            case CHAT_SOURCE_CLAUDE:
-                return 'claude_model';
-            case CHAT_SOURCE_MAKERSUITE:
-                return 'google_model';
-            case CHAT_SOURCE_CUSTOM:
-                return 'custom_model';
-            default:
-                return `${source}_model`;
+        const normalized = normalizeApiConfigSource(source);
+        if (!normalized) {
+            return '';
         }
+        return CHAT_SOURCE_MODEL_SETTING_OVERRIDES[normalized] || `${normalized}_model`;
     }
 
     function getChatSourceModelSelector(source) {
-        switch (source) {
-            case CHAT_SOURCE_CLAUDE:
-                return '#model_claude_select';
-            case CHAT_SOURCE_MAKERSUITE:
-                return '#model_google_select';
-            case CHAT_SOURCE_CUSTOM:
-                return '#custom_model_id';
-            default:
-                return '';
+        const normalized = normalizeApiConfigSource(source);
+        if (!normalized) {
+            return '';
         }
+        return CHAT_SOURCE_MODEL_SELECTOR_OVERRIDES[normalized] || `#model_${normalized}_select`;
     }
 
     function getChatSourceSecretKey(source) {
-        switch (source) {
-            case CHAT_SOURCE_CLAUDE:
-                return SECRET_KEY_CLAUDE;
-            case CHAT_SOURCE_MAKERSUITE:
-                return SECRET_KEY_MAKERSUITE;
-            case CHAT_SOURCE_CUSTOM:
-                return SECRET_KEY_CUSTOM;
-            default:
-                return '';
+        const normalized = normalizeApiConfigSource(source);
+        if (!normalized) {
+            return '';
         }
+        return `api_key_${normalized}`;
+    }
+
+    function chatSourceSupportsReverseProxy(source) {
+        return CHAT_SOURCE_REVERSE_PROXY_SOURCES.has(normalizeApiConfigSource(source));
+    }
+
+    function getChatSourceEndpointField(source) {
+        const normalized = normalizeApiConfigSource(source);
+        if (!normalized) {
+            return null;
+        }
+        return CHAT_SOURCE_ENDPOINT_FIELDS[normalized] || (chatSourceSupportsReverseProxy(normalized) ? REVERSE_PROXY_ENDPOINT_FIELD : null);
+    }
+
+    function getApiConfigEndpointField(config, source) {
+        const normalized = normalizeApiConfigSource(source);
+        if (normalized === CHAT_SOURCE_CUSTOM) {
+            return CHAT_SOURCE_ENDPOINT_FIELDS[CHAT_SOURCE_CUSTOM];
+        }
+        if (chatSourceSupportsReverseProxy(normalized) && getFirstString(config?.reverseProxy, config?.proxyPassword)) {
+            return REVERSE_PROXY_ENDPOINT_FIELD;
+        }
+        return getChatSourceEndpointField(normalized);
+    }
+
+    function getConfigEndpointForSource(config, source) {
+        const normalized = normalizeApiConfigSource(source);
+        const camelSource = toCamelSource(normalized);
+
+        if (normalized === CHAT_SOURCE_CUSTOM) {
+            return getFirstString(config?.customUrl, config?.url, config?.endpoint, config?.baseUrl);
+        }
+
+        if (normalized === 'azure_openai') {
+            return getFirstString(config?.azureBaseUrl, config?.azure_base_url, config?.baseUrl, config?.url, config?.customUrl, config?.reverseProxy);
+        }
+
+        if (normalized === 'workers_ai') {
+            return getFirstString(config?.workersAiAccountId, config?.workers_ai_account_id, config?.accountId, config?.account_id);
+        }
+
+        return getFirstString(
+            config?.[`${camelSource}Endpoint`],
+            config?.[`${normalized}_endpoint`],
+            config?.endpoint,
+            config?.reverseProxy,
+            config?.customUrl,
+            config?.url,
+        );
+    }
+
+    function getApiConfigSecretId(config, secretKey, source) {
+        const secretIds = config?.secretIds && typeof config.secretIds === 'object' ? config.secretIds : {};
+        const legacySecretId = normalizeApiConfigSource(source) === CHAT_SOURCE_CUSTOM ? (config?.secretId || config?.keyId || '') : '';
+        return String(secretIds[secretKey] || legacySecretId).trim();
     }
 
     function apiConfigToTargetProfile(config, index) {
-        const rawUrl = String(config?.customUrl || config?.url || '').trim();
-        const rawReverseProxy = String(config?.reverseProxy || '').trim();
+        const rawUrl = getFirstString(config?.customUrl, config?.url);
+        const rawReverseProxy = getFirstString(config?.reverseProxy);
         const model = String(config?.model || '').trim();
         const rawSource = String(config?.source || '').trim();
         const chatSource = getApiConfigChatSource(config, rawUrl || rawReverseProxy, model);
+        const endpointField = getApiConfigEndpointField(config, chatSource);
+        const endpointValue = endpointField ? getConfigEndpointForSource(config, chatSource) : '';
         const secretKey = getChatSourceSecretKey(chatSource);
-        const secretIds = config?.secretIds && typeof config.secretIds === 'object' ? config.secretIds : {};
-        const legacySecretId = chatSource === CHAT_SOURCE_CUSTOM ? (config?.secretId || config?.keyId || '') : '';
-        const secretId = String(secretIds[secretKey] || legacySecretId).trim();
-        const apiUrl = chatSource === CHAT_SOURCE_CUSTOM ? rawUrl : '';
-        const reverseProxy = chatSource === CHAT_SOURCE_CUSTOM ? '' : (rawReverseProxy || rawUrl);
+        const secretId = getApiConfigSecretId(config, secretKey, chatSource);
+        const apiUrl = chatSource === CHAT_SOURCE_CUSTOM ? endpointValue : '';
+        const reverseProxy = chatSource !== CHAT_SOURCE_CUSTOM && endpointField?.setting === REVERSE_PROXY_ENDPOINT_FIELD.setting ? endpointValue : '';
         const name = String(config?.name || `API 配置 ${index + 1}`).trim();
         return {
             id: makeApiTargetKeyFromApiConfig(config, index),
@@ -363,15 +520,20 @@
             'api-url-source': apiUrl ? CHAT_SOURCE_CUSTOM : '',
             'api-url': apiUrl,
             'reverse-proxy': reverseProxy,
+            'endpoint-setting': endpointField?.setting || '',
+            'endpoint-selector': endpointField?.selector || '',
+            'endpoint-value': endpointValue,
             'proxy-password': String(config?.proxyPassword || '').trim(),
             model,
             'model-setting': getChatSourceModelSettingKey(chatSource),
+            'model-selector': getChatSourceModelSelector(chatSource),
             'secret-key': secretKey,
             proxy: '',
             'secret-id': secretId,
             name,
             source: API_CONFIG_MANAGER_KEY,
             rawSource,
+            chatSourceLabel: getChatSourceLabel(chatSource),
             group: String(config?.group || '').trim(),
         };
     }
@@ -380,6 +542,10 @@
         if (!profile?.id || !profile?.name) {
             return null;
         }
+        const mainApi = getProfileMainApi(profile);
+        const chatSource = mainApi === MAIN_API_CHAT_COMPLETION
+            ? normalizeApiConfigSource(profile.api || profile['api-url-source'])
+            : mainApi;
         return {
             key: `connection:${profile.id}`,
             source: 'connection',
@@ -387,6 +553,8 @@
             id: profile.id,
             name: profile.name,
             displayName: profile.name,
+            chatSource,
+            chatSourceLabel: getChatSourceLabel(chatSource) || mainApi,
             group: '',
             profile: clonePlainObject(profile),
             ownsConnectionProfile: true,
@@ -398,7 +566,13 @@
             return null;
         }
         const profile = apiConfigToTargetProfile(config, index);
-        if (!profile['api-url'] && !profile['reverse-proxy'] && !profile.model) {
+        if (
+            profile.api === CHAT_SOURCE_CUSTOM
+            && !profile['api-url']
+            && !profile.model
+            && !profile['secret-id']
+            && !String(config?.key || '').trim()
+        ) {
             return null;
         }
         return {
@@ -408,6 +582,8 @@
             id: profile.id,
             name: profile.name,
             displayName: profile.name,
+            chatSource: profile.api,
+            chatSourceLabel: profile.chatSourceLabel,
             group: profile.group,
             profile,
             ownsConnectionProfile: false,
@@ -421,7 +597,7 @@
         const apiConfigEntries = getApiConfigRecordsRaw()
             .map(apiConfigToApiTarget)
             .filter(Boolean);
-        return [...connectionEntries, ...apiConfigEntries];
+        return [...apiConfigEntries, ...connectionEntries];
     }
 
     function findApiTargetEntry(value = '') {
@@ -461,7 +637,9 @@
             return '';
         }
 
-        const parts = [profile.rawSource || profile.api, profile['api-url'] || profile['reverse-proxy'], profile.model]
+        const sourceLabel = getChatSourceLabel(profile.api || profile.rawSource);
+        const endpoint = profile['api-url'] || profile['endpoint-value'] || profile['reverse-proxy'];
+        const parts = [sourceLabel || profile.rawSource || profile.api, endpoint, profile.model]
             .map(value => String(value ?? '').trim())
             .filter(Boolean);
         return parts.length ? parts.join(' / ') : 'API 设置';
@@ -474,7 +652,10 @@
         }
 
         const api = getProfileField(profile, 'api');
-        return api === CHAT_SOURCE_CUSTOM ? MAIN_API_CHAT_COMPLETION : api;
+        if (profile?.mode === 'cc' || isChatCompletionSource(api)) {
+            return MAIN_API_CHAT_COMPLETION;
+        }
+        return api;
     }
 
     function getProfileApiUrlSource(profile) {
@@ -524,49 +705,65 @@
         return String(profile?.[key] ?? '').trim();
     }
 
-    function setElementValue(selector, value, { emit = true } = {}) {
+    function setElementValue(selector, value, { emit = true, addMissingOption = false } = {}) {
         const element = document.querySelector(selector);
         if (!element) {
             return false;
         }
 
-        element.value = String(value ?? '');
+        const text = String(value ?? '');
+        if (addMissingOption && element instanceof HTMLSelectElement && text) {
+            const hasOption = Array.from(element.options || []).some(option => option.value === text);
+            if (!hasOption) {
+                element.append(new Option(text, text));
+            }
+        }
+
+        element.value = text;
         if (emit) {
             emitInputAndChange(element);
         }
         return true;
     }
 
-    async function syncChatCompletionFields(profile) {
-        if (getProfileMainApi(profile) !== MAIN_API_CHAT_COMPLETION) {
-            return;
+    function setChatCompletionSourceValue(source) {
+        const element = document.querySelector('#chat_completion_source');
+        if (!element) {
+            return null;
         }
 
-        const chatSource = getProfileField(profile, 'api') || getProfileApiUrlSource(profile);
-        if (!chatSource) {
-            return;
+        const value = String(source || '').trim();
+        if (element instanceof HTMLSelectElement) {
+            const hasOption = Array.from(element.options || []).some(option => option.value === value);
+            if (!hasOption) {
+                return false;
+            }
         }
 
-        const apiUrl = getProfileField(profile, 'api-url');
-        const reverseProxy = getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy');
+        return setElementValue('#chat_completion_source', value);
+    }
+
+    function selectNoProxyPreset() {
+        const proxySelect = document.querySelector('#openai_proxy_preset');
+        if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
+            proxySelect.value = 'None';
+        }
+        setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
+    }
+
+    function syncEndpointField(profile, module) {
+        const chatSource = normalizeApiConfigSource(getProfileField(profile, 'api'));
+        const endpointSetting = getProfileField(profile, 'endpoint-setting')
+            || (chatSource === CHAT_SOURCE_CUSTOM ? 'custom_url' : REVERSE_PROXY_ENDPOINT_FIELD.setting);
+        const endpointSelector = getProfileField(profile, 'endpoint-selector');
+        const endpointValue = getProfileField(profile, 'endpoint-value')
+            || (chatSource === CHAT_SOURCE_CUSTOM
+                ? getProfileField(profile, 'api-url')
+                : getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy'));
         const proxyPassword = getProfileField(profile, 'proxy-password');
-        const model = getProfileField(profile, 'model');
-        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(chatSource);
-        const modelSelector = getChatSourceModelSelector(chatSource);
-        const module = await getOpenAiModule();
-
-        setElementValue('#chat_completion_source', chatSource);
-        if (module?.oai_settings) {
-            module.oai_settings.chat_completion_source = chatSource;
-        }
 
         if (chatSource === CHAT_SOURCE_CUSTOM) {
-            const proxySelect = document.querySelector('#openai_proxy_preset');
-            if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
-                proxySelect.value = 'None';
-            }
-
-            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
+            selectNoProxyPreset();
             setElementValue('#openai_reverse_proxy', '');
             setElementValue('#openai_proxy_password', '');
             if (module?.oai_settings) {
@@ -574,33 +771,72 @@
                 module.oai_settings.proxy_password = '';
             }
 
-            if (apiUrl) {
+            if (endpointValue) {
                 if (module?.oai_settings) {
-                    module.oai_settings.custom_url = apiUrl;
+                    module.oai_settings.custom_url = endpointValue;
                 }
-                setElementValue('#custom_api_url_text', apiUrl);
+                setElementValue('#custom_api_url_text', endpointValue);
             }
-        } else if (reverseProxy || proxyPassword) {
-            const proxySelect = document.querySelector('#openai_proxy_preset');
-            if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
-                proxySelect.value = 'None';
-            }
+            return;
+        }
 
-            setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
-            setElementValue('#openai_reverse_proxy', reverseProxy);
+        if (endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting || !endpointSetting) {
+            selectNoProxyPreset();
+            setElementValue('#openai_reverse_proxy', endpointValue);
             setElementValue('#openai_proxy_password', proxyPassword);
             if (module?.oai_settings) {
-                module.oai_settings.reverse_proxy = reverseProxy;
+                module.oai_settings.reverse_proxy = endpointValue;
                 module.oai_settings.proxy_password = proxyPassword;
             }
+            return;
         }
+
+        if (module?.oai_settings) {
+            module.oai_settings.reverse_proxy = '';
+            module.oai_settings.proxy_password = '';
+        }
+
+        if (module?.oai_settings) {
+            module.oai_settings[endpointSetting] = endpointValue;
+        }
+        if (endpointSelector) {
+            setElementValue(endpointSelector, endpointValue, { addMissingOption: Boolean(endpointValue) });
+        }
+        setElementValue('#openai_reverse_proxy', '');
+        setElementValue('#openai_proxy_password', '');
+    }
+
+    async function syncChatCompletionFields(profile) {
+        if (getProfileMainApi(profile) !== MAIN_API_CHAT_COMPLETION) {
+            return;
+        }
+
+        const chatSource = normalizeApiConfigSource(getProfileField(profile, 'api') || getProfileApiUrlSource(profile));
+        if (!chatSource) {
+            return;
+        }
+
+        const model = getProfileField(profile, 'model');
+        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(chatSource);
+        const modelSelector = getProfileField(profile, 'model-selector') || getChatSourceModelSelector(chatSource);
+        const module = await getOpenAiModule();
+        const sourceResult = setChatCompletionSourceValue(chatSource);
+        if (sourceResult === false) {
+            throw new Error(`当前 SillyTavern 不支持聊天补全来源：${chatSource}`);
+        }
+
+        if (module?.oai_settings) {
+            module.oai_settings.chat_completion_source = chatSource;
+        }
+
+        syncEndpointField(profile, module);
 
         if (model) {
             if (module?.oai_settings) {
                 module.oai_settings[modelSetting] = model;
             }
             if (modelSelector) {
-                setElementValue(modelSelector, model);
+                setElementValue(modelSelector, model, { addMissingOption: true });
             }
         }
     }
@@ -628,7 +864,7 @@
 
             await syncChatCompletionFields(profile);
 
-            if (apiUrl && getProfileField(profile, 'api') === CHAT_SOURCE_CUSTOM) {
+            if (apiUrl && normalizeApiConfigSource(getProfileField(profile, 'api')) === CHAT_SOURCE_CUSTOM) {
                 const apiArg = apiUrlSource ? ` api=${quoteSlashArg(apiUrlSource)}` : '';
                 await runSlashCommand(`/api-url${apiArg} connect=false quiet=true ${quoteSlashArg(apiUrl)}`);
             }
@@ -690,6 +926,19 @@
         return getApiTargetEntries().find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
     }
 
+    async function getNativeMatchingApiTargetEntry() {
+        for (const entry of getApiTargetEntries()) {
+            try {
+                if (await activeTargetMatchesNativeState(entry.profile)) {
+                    return entry;
+                }
+            } catch {
+                // A failed comparison should not block manual API-state sync.
+            }
+        }
+        return null;
+    }
+
     function getActiveApiTargetEntry() {
         const settings = getSettings();
         let entry = settings.activeApiTargetKey ? getApiTargetEntryByKey(settings.activeApiTargetKey) : null;
@@ -729,11 +978,15 @@
             return false;
         }
 
-        const api = getProfileField(profile, 'api');
+        const api = normalizeApiConfigSource(getProfileField(profile, 'api'));
         const mainApi = getProfileMainApi(profile);
-        const apiUrlSource = getProfileApiUrlSource(profile);
         const apiUrl = getProfileField(profile, 'api-url');
-        const reverseProxy = getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy');
+        const endpointSetting = getProfileField(profile, 'endpoint-setting')
+            || (api === CHAT_SOURCE_CUSTOM ? 'custom_url' : REVERSE_PROXY_ENDPOINT_FIELD.setting);
+        const endpointValue = getProfileField(profile, 'endpoint-value')
+            || (api === CHAT_SOURCE_CUSTOM
+                ? apiUrl
+                : getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy'));
         const proxyPassword = getProfileField(profile, 'proxy-password');
         const model = getProfileField(profile, 'model');
         const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(api);
@@ -753,15 +1006,27 @@
                 return false;
             }
 
-            if (api === CHAT_SOURCE_CUSTOM && apiUrl && oai.custom_url !== apiUrl) {
+            if (api === CHAT_SOURCE_CUSTOM && endpointValue && oai.custom_url !== endpointValue) {
                 return false;
             }
 
-            if (api !== CHAT_SOURCE_CUSTOM && reverseProxy && oai.reverse_proxy !== reverseProxy) {
+            if (api !== CHAT_SOURCE_CUSTOM && endpointValue && endpointSetting && String(oai[endpointSetting] || '') !== endpointValue) {
                 return false;
             }
 
-            if (proxyPassword && oai.proxy_password !== proxyPassword) {
+            if (api !== CHAT_SOURCE_CUSTOM && !endpointValue && endpointSetting && endpointSetting !== REVERSE_PROXY_ENDPOINT_FIELD.setting && oai[endpointSetting]) {
+                return false;
+            }
+
+            if (api !== CHAT_SOURCE_CUSTOM && endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting && !endpointValue && (oai.reverse_proxy || oai.proxy_password)) {
+                return false;
+            }
+
+            if (api !== CHAT_SOURCE_CUSTOM && endpointSetting !== REVERSE_PROXY_ENDPOINT_FIELD.setting && (oai.reverse_proxy || oai.proxy_password)) {
+                return false;
+            }
+
+            if (endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting && proxyPassword && oai.proxy_password !== proxyPassword) {
                 return false;
             }
 
@@ -769,7 +1034,7 @@
                 return false;
             }
 
-            if (api === CHAT_SOURCE_CUSTOM && !reverseProxy && (oai.reverse_proxy || oai.proxy_password)) {
+            if (api === CHAT_SOURCE_CUSTOM && (oai.reverse_proxy || oai.proxy_password)) {
                 return false;
             }
         }
@@ -952,10 +1217,10 @@
     }
 
     async function setActiveApiTargetToCurrent({ notify = false } = {}) {
-        const current = getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
+        const current = getActiveApiTargetEntry() || await getNativeMatchingApiTargetEntry() || getSelectedConnectionProfileTarget();
         if (!current) {
             if (notify) {
-                globalThis.toastr?.warning?.('没有读取到当前 Connection Profile。请先在酒馆里保存一个连接配置。', 'SillyTavern Tool Ball');
+                globalThis.toastr?.warning?.('没有读取到当前 API 配置。请先在 API 管理器或 Connection Profiles 中保存一个配置。', 'SillyTavern Tool Ball');
             }
             return '';
         }
@@ -1022,7 +1287,7 @@
             return;
         }
 
-        const current = getSelectedConnectionProfileTarget();
+        const current = await getNativeMatchingApiTargetEntry() || getSelectedConnectionProfileTarget();
         if (!current) {
             return;
         }
@@ -1801,9 +2066,8 @@
     function renderToolPanelLoading() {
         elements.toolPanel.innerHTML = `
             <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API 配置</div>
+            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索 / 收藏</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
+            <div class="stcsj-tool-section-title">API 切换器</div>
             <div class="stcsj-tool-empty">读取配置中...</div>`;
 
         positionToolPanel();
@@ -1811,10 +2075,6 @@
         elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
             closeToolPanel();
             openPanel('search');
-        });
-        elements.toolPanel.querySelector(`#${ID}-open-favorites`)?.addEventListener('click', () => {
-            closeToolPanel();
-            openPanel('favorites');
         });
     }
 
@@ -1830,15 +2090,16 @@
         setCurrentApiTargetEntry(currentEntry);
         const currentLabel = state.currentApiTarget;
 
-        const settings = getSettings();
         applyOfficialPresetConnectionDecouple();
         const profileHtml = entries.length
             ? entries.map(entry => {
                 const active = entry.key === state.currentApiTargetKey;
                 const meta = [entry.sourceLabel, entry.group].filter(Boolean).join(' · ');
+                const sourceTag = entry.chatSourceLabel ? `<span class="stcsj-api-source-tag">${escapeHtml(entry.chatSourceLabel)}</span>` : '';
                 return `
                     <button type="button" class="stcsj-profile-item${active ? ' active' : ''}" data-profile-key="${escapeHtml(entry.key)}">
-                        <span>${escapeHtml(entry.displayName || entry.name)}</span>
+                        <span class="stcsj-profile-name">${escapeHtml(entry.displayName || entry.name)}</span>
+                        ${sourceTag}
                         ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
                         <i class="fa-solid ${active ? 'fa-check' : 'fa-rotate'}"></i>
                     </button>`;
@@ -1847,9 +2108,8 @@
 
         elements.toolPanel.innerHTML = `
             <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API 配置</div>
+            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索 / 收藏</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
+            <div class="stcsj-tool-section-title">API 切换器</div>
             <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(currentLabel || '未知')}</strong></div>
             <div class="stcsj-profile-list">${profileHtml}</div>
             <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
@@ -1859,10 +2119,6 @@
         elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
             closeToolPanel();
             openPanel('search');
-        });
-        elements.toolPanel.querySelector(`#${ID}-open-favorites`)?.addEventListener('click', () => {
-            closeToolPanel();
-            openPanel('favorites');
         });
         elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
@@ -2653,7 +2909,7 @@
                         <i class="fa-solid fa-magnifying-glass"></i>
                         <input id="${ID}-input" type="search" placeholder="输入关键词" autocomplete="off">
                     </label>
-                    <button type="button" class="stcsj-text-btn stcsj-api-open" id="${ID}-open-api-from-search" title="打开预设/API 解耦设置"><i class="fa-solid fa-link-slash"></i><span>API</span></button>
+                    <button type="button" class="stcsj-text-btn stcsj-api-open" id="${ID}-open-api-from-search" title="打开 API 切换器"><i class="fa-solid fa-plug-circle-bolt"></i><span>API</span></button>
                     <button type="button" class="stcsj-icon-btn" id="${ID}-close" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
                 </div>
                 <div class="stcsj-options">
@@ -2910,6 +3166,7 @@
         on('PRESET_CHANGED', handlePresetChangedForApiGuard);
         on('SETTINGS_UPDATED', () => enforcePresetConnectionDecouple({ notify: false }));
         on('MAIN_API_CHANGED', handleMainApiChangedForApiGuard);
+        on('CHATCOMPLETION_SOURCE_CHANGED', handleMainApiChangedForApiGuard);
         on('GENERATION_STARTED', () => restoreActiveApiTargetIfNeeded('generation started'));
     }
 

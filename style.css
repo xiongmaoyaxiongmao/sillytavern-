@@ -7,6 +7,7 @@
     --stcsj-surface: var(--SmartThemeBlurTintColor, rgba(22, 24, 30, 0.94));
     --stcsj-soft: rgba(255, 255, 255, 0.065);
     --stcsj-softer: rgba(255, 255, 255, 0.04);
+    --stcsj-muted: color-mix(in srgb, var(--SmartThemeBodyColor, #f4f4f4) 66%, transparent);
     --stcsj-warn: #ffe16a;
 }
 
@@ -191,9 +192,29 @@
     justify-content: space-between;
 }
 
+.stcsj-profile-name {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.stcsj-api-source-tag {
+    flex: 0 0 auto;
+    max-width: 112px;
+    overflow: hidden;
+    padding: 3px 7px;
+    border: 1px solid rgba(122, 183, 255, 0.22);
+    border-radius: 999px;
+    color: var(--stcsj-accent);
+    background: rgba(122, 183, 255, 0.10);
+    font-size: 11px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .stcsj-profile-item small {
     flex: 0 0 auto;
-    max-width: 86px;
+    max-width: 72px;
     overflow: hidden;
     color: var(--stcsj-muted);
     font-size: 11px;
@@ -202,7 +223,7 @@
     white-space: nowrap;
 }
 
-.stcsj-profile-item span,
+.stcsj-profile-name,
 .stcsj-tool-action span {
     flex: 1 1 auto;
     min-width: 0;
