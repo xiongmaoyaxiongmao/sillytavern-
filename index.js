@@ -5,6 +5,7 @@
     const METADATA_KEY = 'chat_search_jump_favorites_v2';
     const ID = 'st-chat-search-jump';
     const CONNECTION_MANAGER_KEY = 'connectionManager';
+    const API_CONFIG_MANAGER_KEY = 'api-config-manager';
     const MAX_AUTO_LOAD_ATTEMPTS = 120;
     const SEARCH_DEBOUNCE_MS = 120;
     const API_GUARD_ENFORCE_MS = 2500;
@@ -24,6 +25,7 @@
         decouplePresetConnection: true,
         lockApiProfile: true,
         lockedProfile: '',
+        lockedProfileKey: '',
     });
 
     const fallbackSettings = { ...DEFAULT_SETTINGS };
@@ -39,6 +41,7 @@
         toolsOpen: false,
         mode: 'search',
         currentProfile: '',
+        currentProfileKey: '',
         searchToken: 0,
         jumpToken: 0,
         apiSwitching: false,
@@ -222,28 +225,136 @@
         return Array.isArray(store?.profiles) ? store.profiles : [];
     }
 
-    function findConnectionProfile(value = '') {
-        const search = String(value ?? '').trim();
-        const profiles = getConnectionProfilesRaw();
-        if (!profiles.length) {
+    function getApiConfigManagerStore() {
+        const context = getContext();
+        return context?.extensionSettings?.[API_CONFIG_MANAGER_KEY] ?? null;
+    }
+
+    function getApiConfigRecordsRaw() {
+        const store = getApiConfigManagerStore();
+        return Array.isArray(store?.configs) ? store.configs : [];
+    }
+
+    function hashString(value) {
+        const text = String(value ?? '');
+        let hash = 0;
+        for (let index = 0; index < text.length; index += 1) {
+            hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    function makeApiConfigKey(config, index) {
+        const material = [
+            config?.name,
+            config?.source,
+            config?.customUrl || config?.url,
+            config?.model,
+            config?.secretIds?.api_key_custom,
+        ].join('|');
+        return `api-config:${index}:${hashString(material)}`;
+    }
+
+    function apiConfigToProfile(config, index) {
+        const apiUrl = String(config?.customUrl || config?.url || '').trim();
+        const model = String(config?.model || '').trim();
+        const source = String(config?.source || 'custom').trim() || 'custom';
+        const secretId = String(config?.secretIds?.api_key_custom || config?.secretId || config?.keyId || '').trim();
+        const name = String(config?.name || `API 配置 ${index + 1}`).trim();
+        return {
+            id: makeApiConfigKey(config, index),
+            mode: 'cc',
+            exclude: ['preset', 'proxy'],
+            api: source,
+            'api-url': apiUrl,
+            model,
+            proxy: '',
+            'secret-id': secretId,
+            name,
+            source: API_CONFIG_MANAGER_KEY,
+            group: String(config?.group || '').trim(),
+        };
+    }
+
+    function connectionProfileToEntry(profile) {
+        if (!profile?.id || !profile?.name) {
+            return null;
+        }
+        return {
+            key: `connection:${profile.id}`,
+            source: 'connection',
+            sourceLabel: 'Profile',
+            id: profile.id,
+            name: profile.name,
+            displayName: profile.name,
+            group: '',
+            profile: clonePlainObject(profile),
+        };
+    }
+
+    function apiConfigToEntry(config, index) {
+        if (!config || typeof config !== 'object') {
+            return null;
+        }
+        const profile = apiConfigToProfile(config, index);
+        if (!profile['api-url'] && !profile.model) {
+            return null;
+        }
+        return {
+            key: profile.id,
+            source: API_CONFIG_MANAGER_KEY,
+            sourceLabel: 'API管理器',
+            id: profile.id,
+            name: profile.name,
+            displayName: profile.name,
+            group: profile.group,
+            profile,
+        };
+    }
+
+    function getProfileEntries() {
+        const connectionEntries = getConnectionProfilesRaw()
+            .map(connectionProfileToEntry)
+            .filter(Boolean);
+        const apiConfigEntries = getApiConfigRecordsRaw()
+            .map(apiConfigToEntry)
+            .filter(Boolean);
+        return [...connectionEntries, ...apiConfigEntries];
+    }
+
+    function findProfileEntry(value = '') {
+        const search = String(value ?? '');
+        const trimmed = search.trim();
+        const entries = getProfileEntries();
+        if (!search && !trimmed) {
+            const store = getConnectionManagerStore();
+            if (store?.selectedProfile) {
+                return entries.find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
+            }
             return null;
         }
 
-        const store = getConnectionManagerStore();
-        if (!search && store?.selectedProfile) {
-            return profiles.find(profile => profile?.id === store.selectedProfile) || null;
-        }
-
-        return profiles.find(profile => profile?.id === search || profile?.name === search) || null;
+        return entries.find(entry =>
+            entry.key === search
+            || entry.key === trimmed
+            || entry.id === search
+            || entry.id === trimmed
+            || entry.name === search
+            || entry.name === trimmed
+            || String(entry.name || '').trim() === trimmed) || null;
     }
 
-    async function getConnectionProfileDetails(name = '') {
-        const localProfile = findConnectionProfile(name);
-        if (localProfile) {
-            return clonePlainObject(localProfile);
+    function getProfileEntryByKey(key) {
+        return getProfileEntries().find(entry => entry.key === key) || null;
+    }
+
+    async function getConnectionProfileDetails(value = '') {
+        const entry = findProfileEntry(value);
+        if (entry?.profile) {
+            return clonePlainObject(entry.profile);
         }
 
-        const command = name ? `/profile-get ${quoteSlashArg(name)}` : '/profile-get';
+        const command = value ? `/profile-get ${quoteSlashArg(value)}` : '/profile-get';
         return parseJsonObject(await runSlashCommand(command));
     }
 
@@ -353,7 +464,7 @@
         }
     }
 
-    async function applyConnectionProfileFields(profile) {
+    async function applyConnectionProfileFields(profile, { markConnectionManager = true } = {}) {
         if (!profile) {
             return '';
         }
@@ -387,7 +498,9 @@
                 await runSlashCommand(`/secret-id quiet=true ${quoteSlashArg(secretId)}`);
             }
 
-            await markConnectionProfileSelected(profile);
+            if (markConnectionManager) {
+                await markConnectionProfileSelected(profile);
+            }
             await enforcePresetConnectionDecouple();
             await saveNativeSettingsNow();
             await resetNativeConnectionStatus('connection profile switched');
@@ -400,12 +513,95 @@
     }
 
     async function applyConnectionProfileByName(name) {
-        const profile = await getConnectionProfileDetails(name);
+        const entry = findProfileEntry(name);
+        const profile = entry?.profile || await getConnectionProfileDetails(name);
         if (!profile) {
             globalThis.toastr?.warning?.(`没有找到连接配置：${name}`, 'SillyTavern Tool Ball');
             return '';
         }
-        return applyConnectionProfileFields(profile);
+        return applyConnectionProfileFields(profile, { markConnectionManager: entry?.source !== API_CONFIG_MANAGER_KEY });
+    }
+
+    async function applyProfileEntry(entry) {
+        if (!entry?.profile) {
+            return '';
+        }
+
+        return applyConnectionProfileFields(entry.profile, {
+            markConnectionManager: entry.source !== API_CONFIG_MANAGER_KEY,
+        });
+    }
+
+    function setCurrentProfileEntry(entry) {
+        state.currentProfileKey = entry?.key || '';
+        state.currentProfile = entry?.displayName || entry?.name || '';
+        updateToolBallTitle();
+    }
+
+    function getSelectedConnectionProfileEntry() {
+        const store = getConnectionManagerStore();
+        if (!store?.selectedProfile) {
+            return null;
+        }
+        return getProfileEntries().find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
+    }
+
+    function getLockedProfileEntry() {
+        const settings = getSettings();
+        let entry = settings.lockedProfileKey ? getProfileEntryByKey(settings.lockedProfileKey) : null;
+        if (!entry && settings.lockedProfile) {
+            entry = findProfileEntry(settings.lockedProfile);
+            if (entry) {
+                settings.lockedProfileKey = entry.key;
+                settings.lockedProfile = entry.name;
+                saveSettings();
+            }
+        }
+        return entry;
+    }
+
+    function setLockedProfileEntry(entry) {
+        const settings = getSettings();
+        settings.lockedProfileKey = entry?.key || '';
+        settings.lockedProfile = entry?.name || '';
+        saveSettings();
+    }
+
+    async function profileMatchesNativeState(profile) {
+        if (!profile) {
+            return false;
+        }
+
+        const api = getProfileField(profile, 'api');
+        const apiUrl = getProfileField(profile, 'api-url');
+        const model = getProfileField(profile, 'model');
+        const proxy = getProfileField(profile, 'proxy');
+        const openAiModule = await getOpenAiModule();
+        const coreModule = await getCoreModule();
+        const oai = openAiModule?.oai_settings;
+        if (!oai) {
+            return false;
+        }
+
+        if (api === 'custom') {
+            if (coreModule?.main_api && coreModule.main_api !== 'openai') {
+                return false;
+            }
+            if (oai.chat_completion_source !== 'custom') {
+                return false;
+            }
+            if (apiUrl && oai.custom_url !== apiUrl) {
+                return false;
+            }
+            if (model && oai.custom_model !== model) {
+                return false;
+            }
+            if (!proxy && (oai.reverse_proxy || oai.proxy_password)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     function escapeHtml(value) {
@@ -583,7 +779,7 @@
     }
 
     async function setLockedProfileToCurrent({ notify = false } = {}) {
-        const current = await getCurrentProfile();
+        const current = getSelectedConnectionProfileEntry() || getLockedProfileEntry();
         if (!current) {
             if (notify) {
                 globalThis.toastr?.warning?.('没有读取到当前 Connection Profile。请先在酒馆里保存一个连接配置。', 'SillyTavern Tool Ball');
@@ -591,24 +787,22 @@
             return '';
         }
 
-        const settings = getSettings();
-        settings.lockedProfile = current;
-        settings.lockApiProfile = true;
-        state.currentProfile = current;
-        saveSettings();
-        updateToolBallTitle();
+        getSettings().lockApiProfile = true;
+        setLockedProfileEntry(current);
+        setCurrentProfileEntry(current);
 
         if (notify) {
-            globalThis.toastr?.success?.(`已锁定当前 API 配置：${current}`, 'SillyTavern Tool Ball');
+            globalThis.toastr?.success?.(`已锁定当前 API 配置：${current.displayName || current.name}`, 'SillyTavern Tool Ball');
         }
 
-        return current;
+        return current.name;
     }
 
     async function seedLockedProfileIfNeeded() {
         const settings = getSettings();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || settings.lockedProfile) {
-            return settings.lockedProfile || '';
+        const lockedEntry = getLockedProfileEntry();
+        if (!settings.decouplePresetConnection || !settings.lockApiProfile || lockedEntry) {
+            return lockedEntry?.name || '';
         }
         return setLockedProfileToCurrent({ notify: false });
     }
@@ -623,7 +817,8 @@
 
     async function restoreLockedProfileIfNeeded(reason = 'preset changed') {
         const settings = getSettings();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || !settings.lockedProfile) {
+        const lockedEntry = getLockedProfileEntry();
+        if (!settings.decouplePresetConnection || !settings.lockApiProfile || !lockedEntry) {
             return;
         }
         if (isProfileRestoreSuppressed()) {
@@ -632,30 +827,20 @@
 
         await enforcePresetConnectionDecouple();
 
-        const current = await getCurrentProfile();
-        if (!current) {
-            return;
-        }
-
-        state.currentProfile = current;
-        updateToolBallTitle();
-
-        if (current === settings.lockedProfile) {
+        if (state.currentProfileKey === lockedEntry.key && await profileMatchesNativeState(lockedEntry.profile)) {
             return;
         }
 
         suppressProfileRestore(7000);
-        await applyConnectionProfileByName(settings.lockedProfile);
-        const restored = await getCurrentProfile();
-        state.currentProfile = restored || settings.lockedProfile;
-        updateToolBallTitle();
+        await applyProfileEntry(lockedEntry);
+        setCurrentProfileEntry(lockedEntry);
 
         if (state.toolsOpen) {
             renderToolPanel();
         }
 
-        console.info(`[Chat Search Jump] Restored locked profile after ${reason}:`, settings.lockedProfile);
-        globalThis.toastr?.info?.(`已保持 API 配置：${settings.lockedProfile}`, 'SillyTavern Tool Ball');
+        console.info(`[Chat Search Jump] Restored locked profile after ${reason}:`, lockedEntry.name);
+        globalThis.toastr?.info?.(`已保持 API 配置：${lockedEntry.displayName || lockedEntry.name}`, 'SillyTavern Tool Ball');
     }
 
     async function syncLockedProfileToCurrent(reason = 'manual API changed') {
@@ -664,18 +849,16 @@
             return;
         }
 
-        const current = await getCurrentProfile();
+        const current = getSelectedConnectionProfileEntry();
         if (!current) {
             return;
         }
 
-        state.currentProfile = current;
-        if (settings.lockedProfile !== current) {
-            settings.lockedProfile = current;
-            saveSettings();
-            console.info(`[Chat Search Jump] Updated hidden API lock after ${reason}:`, current);
+        setCurrentProfileEntry(current);
+        if (settings.lockedProfileKey !== current.key) {
+            setLockedProfileEntry(current);
+            console.info(`[Chat Search Jump] Updated hidden API lock after ${reason}:`, current.name);
         }
-        updateToolBallTitle();
 
         if (state.toolsOpen) {
             renderToolPanel();
@@ -1464,34 +1647,37 @@
 
     async function renderToolPanel() {
         renderToolPanelLoading();
-        const [profiles, current] = await Promise.all([getProfiles(), getCurrentProfile()]);
+        const entries = getProfileEntries();
+        const currentEntry = getLockedProfileEntry() || getSelectedConnectionProfileEntry();
         if (!state.toolsOpen) {
             return;
         }
 
-        state.currentProfile = current;
-        updateToolBallTitle();
+        setCurrentProfileEntry(currentEntry);
+        const currentLabel = state.currentProfile;
 
         const settings = getSettings();
         applyOfficialPresetConnectionDecouple();
         await seedLockedProfileIfNeeded();
-        const profileHtml = profiles.length
-            ? profiles.map(name => {
-                const active = name === current;
+        const profileHtml = entries.length
+            ? entries.map(entry => {
+                const active = entry.key === state.currentProfileKey;
+                const meta = [entry.sourceLabel, entry.group].filter(Boolean).join(' · ');
                 return `
-                    <button type="button" class="stcsj-profile-item${active ? ' active' : ''}" data-profile="${escapeHtml(name)}">
-                        <span>${escapeHtml(name)}</span>
+                    <button type="button" class="stcsj-profile-item${active ? ' active' : ''}" data-profile-key="${escapeHtml(entry.key)}">
+                        <span>${escapeHtml(entry.displayName || entry.name)}</span>
+                        ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
                         <i class="fa-solid ${active ? 'fa-check' : 'fa-rotate'}"></i>
                     </button>`;
             }).join('')
-            : '<div class="stcsj-tool-empty">没有找到连接配置。请确认 Connection Profiles 已启用。</div>';
+            : '<div class="stcsj-tool-empty">没有找到连接配置。请确认 Connection Profiles 或 API 管理器已有记录。</div>';
 
         elements.toolPanel.innerHTML = `
             <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>聊天搜索</span><i class="fa-solid fa-chevron-right"></i></button>
             <button type="button" class="stcsj-tool-action" id="${ID}-open-favorites"><i class="fa-solid fa-star"></i><span>收藏消息</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
             <div class="stcsj-tool-section-title">API 配置</div>
-            <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(current || '未知')}</strong></div>
+            <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(currentLabel || '未知')}</strong></div>
             <div class="stcsj-profile-list">${profileHtml}</div>
             <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
 
@@ -1508,23 +1694,20 @@
         elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
         elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
             item.addEventListener('click', async () => {
-                const name = item.getAttribute('data-profile');
-                if (!name) {
+                const key = item.getAttribute('data-profile-key');
+                const entry = key ? getProfileEntryByKey(key) : null;
+                if (!entry) {
                     closeToolPanel();
                     return;
                 }
 
                 item.classList.add('loading');
                 suppressProfileRestore(5000);
-                const appliedName = await applyConnectionProfileByName(name);
-                state.currentProfile = await getCurrentProfile() || appliedName || name;
-                const profile = await getConnectionProfileDetails(name);
-                updateToolBallTitle();
-                globalThis.toastr?.success?.(`已切换连接：${name}${profile ? `（${describeConnectionProfile(profile)}）` : ''}`, 'SillyTavern Tool Ball');
-                const latestSettings = getSettings();
-                if (latestSettings.lockApiProfile && state.currentProfile) {
-                    latestSettings.lockedProfile = state.currentProfile;
-                    saveSettings();
+                await applyProfileEntry(entry);
+                setCurrentProfileEntry(entry);
+                globalThis.toastr?.success?.(`已切换连接：${entry.displayName || entry.name}（${describeConnectionProfile(entry.profile)}）`, 'SillyTavern Tool Ball');
+                if (getSettings().lockApiProfile) {
+                    setLockedProfileEntry(entry);
                 }
                 closeToolPanel();
             });
@@ -2562,8 +2745,8 @@
         createUi();
         subscribeToEvents();
 
-        getCurrentProfile().then(async profile => {
-            state.currentProfile = profile;
+        Promise.resolve().then(async () => {
+            setCurrentProfileEntry(getLockedProfileEntry() || getSelectedConnectionProfileEntry());
             await enforcePresetConnectionDecouple({ notify: false });
             await seedLockedProfileIfNeeded();
             updateToolBallTitle();
@@ -2579,8 +2762,7 @@
 
         window.setInterval(async () => {
             await restoreLockedProfileIfNeeded('periodic check');
-            state.currentProfile = await getCurrentProfile();
-            updateToolBallTitle();
+            setCurrentProfileEntry(getLockedProfileEntry() || getSelectedConnectionProfileEntry());
         }, PROFILE_LOCK_POLL_MS);
 
         console.info('[Chat Search Jump] loaded');

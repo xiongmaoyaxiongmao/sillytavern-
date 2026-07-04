@@ -2,6 +2,12 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.5.14
+
+- 悬浮球 API 列表直接读取 `api-config-manager.configs`，API 管理器里的记录会作为可点击连接项出现，不需要再手动创建一份 Connection Profile。
+- Profile 列表改为统一数据源：原生 Connection Profiles 和 API 管理器记录都会规范化成同一种内部连接对象，点击时用稳定 key，不再用名称/fuzzy 匹配。
+- 后台锁定改为保存 `lockedProfileKey`，兼容旧 `lockedProfile` 名称，但新切换不再受 profile 名字前后空格影响。
+
 ## v0.5.13
 
 - 修复 Profile 切换后官方面板仍停在旧 Custom URL / model 的问题：现在通过 SillyTavern 原生输入事件写入 `custom_url` 和 `custom_model`，并立即调用原生 `saveSettings()` 落盘。

@@ -191,8 +191,20 @@
     justify-content: space-between;
 }
 
+.stcsj-profile-item small {
+    flex: 0 0 auto;
+    max-width: 86px;
+    overflow: hidden;
+    color: var(--stcsj-muted);
+    font-size: 11px;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .stcsj-profile-item span,
 .stcsj-tool-action span {
+    flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
