@@ -2,30 +2,45 @@
     'use strict';
 
     const MODULE_NAME = 'chat_search_jump';
-    const METADATA_KEY = 'chat_search_jump_favorites_v2';
-    const ID = 'st-chat-search-jump';
-    const CONNECTION_MANAGER_KEY = 'connectionManager';
-    const API_CONFIG_MANAGER_KEY = 'api-config-manager';
+    const API_MANAGER_KEY = 'api-config-manager';
+    const FAVORITE_KEY = 'chat_search_jump_favorites_v3';
+    const ID = 'st-tool-ball';
+    const MAIN_API_CHAT_COMPLETION = 'openai';
     const CHAT_SOURCE_CUSTOM = 'custom';
     const CHAT_SOURCE_CLAUDE = 'claude';
     const CHAT_SOURCE_MAKERSUITE = 'makersuite';
-    const MAIN_API_CHAT_COMPLETION = 'openai';
-    const CHAT_SOURCE_ALIASES = Object.freeze({
+
+    const DEFAULT_SETTINGS = Object.freeze({
+        ballX: null,
+        ballY: null,
+        activeTab: 'api',
+        apiFilter: '',
+        searchQuery: '',
+        caseSensitive: false,
+        includeNames: true,
+        includeHidden: true,
+        maxResults: 300,
+        activeApiKey: '',
+        activeApiName: '',
+    });
+
+    const SOURCE_ALIASES = Object.freeze({
         anthropic: CHAT_SOURCE_CLAUDE,
         google: CHAT_SOURCE_MAKERSUITE,
         'google-ai-studio': CHAT_SOURCE_MAKERSUITE,
         google_ai_studio: CHAT_SOURCE_MAKERSUITE,
         gemini: CHAT_SOURCE_MAKERSUITE,
     });
-    const CHAT_SOURCE_LABELS = Object.freeze({
-        openai: 'OpenAI',
+
+    const SOURCE_LABELS = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: 'Custom (OpenAI兼容)',
         [CHAT_SOURCE_CLAUDE]: 'Claude / Anthropic',
+        [CHAT_SOURCE_MAKERSUITE]: 'Google AI Studio',
+        openai: 'OpenAI',
         openrouter: 'OpenRouter',
         ai21: 'AI21',
-        [CHAT_SOURCE_MAKERSUITE]: 'Google AI Studio',
         vertexai: 'Vertex AI',
         mistralai: 'Mistral AI',
-        [CHAT_SOURCE_CUSTOM]: 'Custom (OpenAI兼容)',
         cohere: 'Cohere',
         perplexity: 'Perplexity',
         groq: 'Groq',
@@ -45,19 +60,62 @@
         workers_ai: 'Cloudflare Workers AI',
         minimax: 'Minimax',
     });
-    const CHAT_SOURCE_MODEL_SETTING_OVERRIDES = Object.freeze({
+
+    const SOURCE_SECRET_KEYS = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: 'api_key_custom',
+        [CHAT_SOURCE_CLAUDE]: 'api_key_claude',
+        [CHAT_SOURCE_MAKERSUITE]: 'api_key_makersuite',
+        openai: 'api_key_openai',
+        openrouter: 'api_key_openrouter',
+        ai21: 'api_key_ai21',
+        vertexai: 'api_key_vertexai',
+        mistralai: 'api_key_mistralai',
+        cohere: 'api_key_cohere',
+        perplexity: 'api_key_perplexity',
+        groq: 'api_key_groq',
+        chutes: 'api_key_chutes',
+        electronhub: 'api_key_electronhub',
+        nanogpt: 'api_key_nanogpt',
+        deepseek: 'api_key_deepseek',
+        aimlapi: 'api_key_aimlapi',
+        xai: 'api_key_xai',
+        pollinations: 'api_key_pollinations',
+        moonshot: 'api_key_moonshot',
+        fireworks: 'api_key_fireworks',
+        cometapi: 'api_key_cometapi',
+        azure_openai: 'api_key_azure_openai',
+        zai: 'api_key_zai',
+        siliconflow: 'api_key_siliconflow',
+        workers_ai: 'api_key_workers_ai',
+        minimax: 'api_key_minimax',
+    });
+
+    const SOURCE_MODEL_SETTINGS = Object.freeze({
         [CHAT_SOURCE_CUSTOM]: 'custom_model',
+        [CHAT_SOURCE_CLAUDE]: 'claude_model',
         [CHAT_SOURCE_MAKERSUITE]: 'google_model',
         azure_openai: 'azure_openai_model',
         workers_ai: 'workers_ai_model',
     });
-    const CHAT_SOURCE_MODEL_SELECTOR_OVERRIDES = Object.freeze({
+
+    const SOURCE_MODEL_SELECTORS = Object.freeze({
         [CHAT_SOURCE_CUSTOM]: '#custom_model_id',
+        [CHAT_SOURCE_CLAUDE]: '#model_claude_select',
         [CHAT_SOURCE_MAKERSUITE]: '#model_google_select',
         azure_openai: '#azure_openai_model',
         workers_ai: '#model_workers_ai_select',
     });
-    const CHAT_SOURCE_REVERSE_PROXY_SOURCES = new Set([
+
+    const SOURCE_ENDPOINT_FIELDS = Object.freeze({
+        [CHAT_SOURCE_CUSTOM]: { setting: 'custom_url', selector: '#custom_api_url_text' },
+        siliconflow: { setting: 'siliconflow_endpoint', selector: '#siliconflow_endpoint' },
+        minimax: { setting: 'minimax_endpoint', selector: '#minimax_endpoint' },
+        zai: { setting: 'zai_endpoint', selector: '#zai_endpoint' },
+        azure_openai: { setting: 'azure_base_url', selector: '#azure_base_url' },
+        workers_ai: { setting: 'workers_ai_account_id', selector: '#workers_ai_account_id' },
+    });
+
+    const REVERSE_PROXY_SOURCES = new Set([
         'openai',
         CHAT_SOURCE_CLAUDE,
         CHAT_SOURCE_MAKERSUITE,
@@ -68,97 +126,25 @@
         'moonshot',
         'zai',
     ]);
-    const REVERSE_PROXY_ENDPOINT_FIELD = Object.freeze({
-        setting: 'reverse_proxy',
-        selector: '#openai_reverse_proxy',
-        profileField: 'reverse-proxy',
-    });
-    const CHAT_SOURCE_ENDPOINT_FIELDS = Object.freeze({
-        [CHAT_SOURCE_CUSTOM]: {
-            setting: 'custom_url',
-            selector: '#custom_api_url_text',
-            profileField: 'api-url',
-        },
-        siliconflow: {
-            setting: 'siliconflow_endpoint',
-            selector: '#siliconflow_endpoint',
-            profileField: 'endpoint-value',
-        },
-        minimax: {
-            setting: 'minimax_endpoint',
-            selector: '#minimax_endpoint',
-            profileField: 'endpoint-value',
-        },
-        zai: {
-            setting: 'zai_endpoint',
-            selector: '#zai_endpoint',
-            profileField: 'endpoint-value',
-        },
-        azure_openai: {
-            setting: 'azure_base_url',
-            selector: '#azure_base_url',
-            profileField: 'endpoint-value',
-        },
-        workers_ai: {
-            setting: 'workers_ai_account_id',
-            selector: '#workers_ai_account_id',
-            profileField: 'endpoint-value',
-        },
-    });
-    const MAX_AUTO_LOAD_ATTEMPTS = 120;
-    const SEARCH_DEBOUNCE_MS = 120;
-    const API_GUARD_ENFORCE_MS = 2500;
-    const PROFILE_LOCK_POLL_MS = 5000;
-    const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
+
     const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
-    const SNAPSHOT_RADIUS = 3;
-    const SNAPSHOT_TEXT_LIMIT = 2200;
-
-    const DEFAULT_SETTINGS = Object.freeze({
-        caseSensitive: false,
-        includeHidden: true,
-        includeNames: true,
-        maxResults: 300,
-        ballX: null,
-        ballY: null,
-        decouplePresetConnection: true,
-        lockApiProfile: true,
-        activeApiTargetKey: '',
-        activeApiTargetName: '',
-        lockedProfile: '',
-        lockedProfileKey: '',
-    });
-
-    const fallbackSettings = { ...DEFAULT_SETTINGS };
-    let fallbackFavoriteStore = null;
+    const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
+    const SEARCH_DEBOUNCE_MS = 100;
 
     const state = {
-        query: '',
-        results: [],
-        messages: [],
-        activeIndex: -1,
-        activeOccurrence: 0,
-        initialized: false,
-        toolsOpen: false,
-        mode: 'search',
-        currentApiTarget: '',
-        currentApiTargetKey: '',
-        searchToken: 0,
-        jumpToken: 0,
-        apiSwitching: false,
-        profileRestoreTimer: null,
-        suppressProfileRestoreUntil: 0,
-        presetGuardActiveUntil: 0,
-        profileSyncTimer: null,
-        openAiModulePromise: null,
         coreModulePromise: null,
-        nativePresetBindKnown: null,
-        nativeModuleWarningShown: false,
-        snapshotToken: 0,
-        snapshotTargetId: null,
+        openAiModulePromise: null,
+        apiItems: [],
+        searchResults: [],
+        searchTimer: null,
+        activeResultIndex: -1,
+        busyApiKey: '',
+        dragging: false,
     };
 
     const elements = {};
+    const fallbackSettings = { ...DEFAULT_SETTINGS };
+    let fallbackFavoriteStore = null;
 
     const escapeMap = Object.freeze({
         '&': '&amp;',
@@ -174,6 +160,39 @@
 
     function hasOwn(object, key) {
         return Object.prototype.hasOwnProperty.call(object, key);
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, character => escapeMap[character]);
+    }
+
+    function firstString(...values) {
+        for (const value of values) {
+            const text = String(value ?? '').trim();
+            if (text) {
+                return text;
+            }
+        }
+        return '';
+    }
+
+    function normalizeSource(source) {
+        const normalized = String(source || CHAT_SOURCE_CUSTOM).trim().toLowerCase();
+        return SOURCE_ALIASES[normalized] || normalized || CHAT_SOURCE_CUSTOM;
+    }
+
+    function sourceLabel(source) {
+        const normalized = normalizeSource(source);
+        return SOURCE_LABELS[normalized] || normalized;
+    }
+
+    function hashString(value) {
+        const text = String(value ?? '');
+        let hash = 0;
+        for (let index = 0; index < text.length; index += 1) {
+            hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+        }
+        return Math.abs(hash).toString(36);
     }
 
     function getSettings() {
@@ -192,28 +211,47 @@
                 settings[key] = value;
             }
         }
-
-        // API / preset 解耦和当前连接保护是后台默认行为，不再暴露前端开关。
-        settings.decouplePresetConnection = true;
-        settings.lockApiProfile = true;
-
         return settings;
     }
 
     function saveSettings() {
-        const context = getContext();
         try {
-            context?.saveSettingsDebounced?.();
+            getContext()?.saveSettingsDebounced?.();
         } catch (error) {
-            console.warn('[Chat Search Jump] Failed to save extension settings.', error);
+            console.warn('[SillyTavern Tool Ball] Failed to save settings.', error);
         }
     }
 
-    function setSetting(key, value) {
-        const settings = getSettings();
-        settings[key] = value;
-        saveSettings();
-        scheduleSearch();
+    async function importFirst(paths) {
+        let lastError = null;
+        for (const path of paths) {
+            try {
+                return await import(path);
+            } catch (error) {
+                lastError = error;
+            }
+        }
+        throw lastError || new Error('Module import failed.');
+    }
+
+    async function getCoreModule() {
+        if (!state.coreModulePromise) {
+            state.coreModulePromise = importFirst(CORE_MODULE_PATHS).catch(error => {
+                state.coreModulePromise = null;
+                throw error;
+            });
+        }
+        return state.coreModulePromise;
+    }
+
+    async function getOpenAiModule() {
+        if (!state.openAiModulePromise) {
+            state.openAiModulePromise = importFirst(OPENAI_MODULE_PATHS).catch(error => {
+                state.openAiModulePromise = null;
+                throw error;
+            });
+        }
+        return state.openAiModulePromise;
     }
 
     async function runSlashCommand(command) {
@@ -230,18 +268,13 @@
                 });
                 return typeof result?.pipe === 'string' ? result.pipe : '';
             }
-
             if (typeof context.executeSlashCommands === 'function') {
                 const result = await context.executeSlashCommands(command);
-                if (typeof result?.pipe === 'string') {
-                    return result.pipe;
-                }
-                return typeof result === 'string' ? result : '';
+                return typeof result?.pipe === 'string' ? result.pipe : (typeof result === 'string' ? result : '');
             }
         } catch (error) {
-            console.error('[SillyTavern Tool Ball] Slash command failed:', command, error);
+            console.warn('[SillyTavern Tool Ball] Slash command failed:', command, error);
         }
-
         return '';
     }
 
@@ -253,1678 +286,606 @@
         return /\s|"/.test(text) ? `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : text;
     }
 
-    function parseProfiles(raw) {
-        const text = String(raw ?? '').trim();
-        if (!text) {
-            return [];
-        }
+    function getApiManagerStore() {
+        return getContext()?.extensionSettings?.[API_MANAGER_KEY] ?? null;
+    }
 
-        try {
-            const parsed = JSON.parse(text);
-            if (Array.isArray(parsed)) {
-                return parsed.map(item => String(item ?? '').trim()).filter(Boolean);
+    function shouldRepairRelayConfig(config) {
+        const source = normalizeSource(config?.source);
+        const hasCustomSecret = Boolean(config?.secretIds?.api_key_custom || config?.secretId);
+        return hasCustomSecret && (source === CHAT_SOURCE_CLAUDE || source === 'anthropic');
+    }
+
+    function repairRelayConfigs() {
+        const store = getApiManagerStore();
+        const configs = Array.isArray(store?.configs) ? store.configs : [];
+        let changed = false;
+
+        for (const config of configs) {
+            if (!config || typeof config !== 'object' || !shouldRepairRelayConfig(config)) {
+                continue;
             }
-        } catch {
-            // The slash command usually returns JSON, but older builds/extensions may return text.
-        }
 
-        return text
-            .split(/\r?\n|,/)
-            .map(line => line.replace(/^[-*\s]+/, '').trim())
-            .filter(line => line && !/^current\s*profile/i.test(line));
-    }
-
-    async function getProfiles() {
-        return parseProfiles(await runSlashCommand('/profile-list'));
-    }
-
-    async function getCurrentProfile() {
-        return (await runSlashCommand('/profile')).trim();
-    }
-
-    function clonePlainObject(value) {
-        if (!value || typeof value !== 'object') {
-            return value;
-        }
-
-        try {
-            if (typeof structuredClone === 'function') {
-                return structuredClone(value);
+            const endpoint = firstString(config.customUrl, config.url, config.reverseProxy);
+            config.source = CHAT_SOURCE_CUSTOM;
+            if (endpoint) {
+                config.customUrl = endpoint;
+                config.url = endpoint;
             }
-        } catch {
-            // Fall through to JSON cloning.
+            delete config.reverseProxy;
+            changed = true;
         }
 
-        try {
-            return JSON.parse(JSON.stringify(value));
-        } catch {
-            return { ...value };
-        }
-    }
-
-    function parseJsonObject(value) {
-        const text = String(value ?? '').trim();
-        if (!text) {
-            return null;
-        }
-
-        try {
-            const parsed = JSON.parse(text);
-            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-        } catch {
-            return null;
-        }
-    }
-
-    function getConnectionManagerStore() {
-        const context = getContext();
-        return context?.extensionSettings?.[CONNECTION_MANAGER_KEY] ?? null;
-    }
-
-    function getConnectionProfilesRaw() {
-        const store = getConnectionManagerStore();
-        return Array.isArray(store?.profiles) ? store.profiles : [];
-    }
-
-    function getApiConfigManagerStore() {
-        const context = getContext();
-        return context?.extensionSettings?.[API_CONFIG_MANAGER_KEY] ?? null;
-    }
-
-    function getApiConfigRecordsRaw() {
-        const store = getApiConfigManagerStore();
-        return Array.isArray(store?.configs) ? store.configs : [];
-    }
-
-    function hashString(value) {
-        const text = String(value ?? '');
-        let hash = 0;
-        for (let index = 0; index < text.length; index += 1) {
-            hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
-        }
-        return Math.abs(hash).toString(36);
-    }
-
-    function makeApiTargetKeyFromApiConfig(config, index) {
-        const explicitId = String(config?.id || config?.uuid || config?.key || '').trim();
-        if (explicitId) {
-            return `api-config:${explicitId}`;
-        }
-
-        const material = [
-            config?.name,
-            config?.source,
-            config?.customUrl || config?.url || config?.reverseProxy || config?.endpoint || config?.baseUrl,
-            config?.model,
-            JSON.stringify(config?.secretIds || {}),
-        ].join('|');
-        return `api-config:${index}:${hashString(material)}`;
-    }
-
-    function normalizeApiConfigSource(source) {
-        const normalized = String(source || '').trim().toLowerCase();
-        return CHAT_SOURCE_ALIASES[normalized] || normalized;
-    }
-
-    function getFirstString(...values) {
-        for (const value of values) {
-            const text = String(value ?? '').trim();
-            if (text) {
-                return text;
-            }
-        }
-        return '';
-    }
-
-    function toCamelSource(source) {
-        return String(source || '').replace(/_([a-z])/g, (_, char) => char.toUpperCase());
-    }
-
-    function getChatSourceLabel(source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (!normalized) {
-            return '';
-        }
-        return CHAT_SOURCE_LABELS[normalized] || normalized;
-    }
-
-    function isChatCompletionSource(source) {
-        const normalized = normalizeApiConfigSource(source);
-        return normalized === CHAT_SOURCE_CUSTOM || hasOwn(CHAT_SOURCE_LABELS, normalized);
-    }
-
-    function getApiConfigChatSource(config) {
-        const rawSource = normalizeApiConfigSource(config?.source);
-        if (rawSource && rawSource !== CHAT_SOURCE_CUSTOM) {
-            return rawSource;
-        }
-        return CHAT_SOURCE_CUSTOM;
-    }
-
-    function getChatSourceModelSettingKey(source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (!normalized) {
-            return '';
-        }
-        return CHAT_SOURCE_MODEL_SETTING_OVERRIDES[normalized] || `${normalized}_model`;
-    }
-
-    function getChatSourceModelSelector(source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (!normalized) {
-            return '';
-        }
-        return CHAT_SOURCE_MODEL_SELECTOR_OVERRIDES[normalized] || `#model_${normalized}_select`;
-    }
-
-    function getChatSourceSecretKey(source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (!normalized) {
-            return '';
-        }
-        return `api_key_${normalized}`;
-    }
-
-    function chatSourceSupportsReverseProxy(source) {
-        return CHAT_SOURCE_REVERSE_PROXY_SOURCES.has(normalizeApiConfigSource(source));
-    }
-
-    function getChatSourceEndpointField(source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (!normalized) {
-            return null;
-        }
-        return CHAT_SOURCE_ENDPOINT_FIELDS[normalized] || (chatSourceSupportsReverseProxy(normalized) ? REVERSE_PROXY_ENDPOINT_FIELD : null);
-    }
-
-    function getApiConfigEndpointField(config, source) {
-        const normalized = normalizeApiConfigSource(source);
-        if (normalized === CHAT_SOURCE_CUSTOM) {
-            return CHAT_SOURCE_ENDPOINT_FIELDS[CHAT_SOURCE_CUSTOM];
-        }
-        if (chatSourceSupportsReverseProxy(normalized) && getFirstString(config?.reverseProxy, config?.proxyPassword)) {
-            return REVERSE_PROXY_ENDPOINT_FIELD;
-        }
-        return getChatSourceEndpointField(normalized);
-    }
-
-    function getConfigEndpointForSource(config, source) {
-        const normalized = normalizeApiConfigSource(source);
-        const camelSource = toCamelSource(normalized);
-
-        if (normalized === CHAT_SOURCE_CUSTOM) {
-            return getFirstString(config?.customUrl, config?.url, config?.endpoint, config?.baseUrl);
-        }
-
-        if (normalized === 'azure_openai') {
-            return getFirstString(config?.azureBaseUrl, config?.azure_base_url, config?.baseUrl, config?.url, config?.customUrl, config?.reverseProxy);
-        }
-
-        if (normalized === 'workers_ai') {
-            return getFirstString(config?.workersAiAccountId, config?.workers_ai_account_id, config?.accountId, config?.account_id);
-        }
-
-        return getFirstString(
-            config?.[`${camelSource}Endpoint`],
-            config?.[`${normalized}_endpoint`],
-            config?.endpoint,
-            config?.reverseProxy,
-            config?.customUrl,
-            config?.url,
-        );
-    }
-
-    function getApiConfigSecretId(config, secretKey, source) {
-        const secretIds = config?.secretIds && typeof config.secretIds === 'object' ? config.secretIds : {};
-        const legacySecretId = normalizeApiConfigSource(source) === CHAT_SOURCE_CUSTOM ? (config?.secretId || config?.keyId || '') : '';
-        return String(secretIds[secretKey] || legacySecretId).trim();
-    }
-
-    function apiConfigToTargetProfile(config, index) {
-        const model = String(config?.model || '').trim();
-        const rawSource = String(config?.source || '').trim();
-        const chatSource = getApiConfigChatSource(config);
-        const endpointField = getApiConfigEndpointField(config, chatSource);
-        const endpointValue = endpointField ? getConfigEndpointForSource(config, chatSource) : '';
-        const secretKey = getChatSourceSecretKey(chatSource);
-        const secretId = getApiConfigSecretId(config, secretKey, chatSource);
-        const apiUrl = chatSource === CHAT_SOURCE_CUSTOM ? endpointValue : '';
-        const reverseProxy = chatSource !== CHAT_SOURCE_CUSTOM && endpointField?.setting === REVERSE_PROXY_ENDPOINT_FIELD.setting ? endpointValue : '';
-        const name = String(config?.name || `API 配置 ${index + 1}`).trim();
-        return {
-            id: makeApiTargetKeyFromApiConfig(config, index),
-            mode: 'cc',
-            exclude: ['preset', 'proxy'],
-            api: chatSource,
-            'main-api': MAIN_API_CHAT_COMPLETION,
-            'api-url-source': apiUrl ? CHAT_SOURCE_CUSTOM : '',
-            'api-url': apiUrl,
-            'reverse-proxy': reverseProxy,
-            'endpoint-setting': endpointField?.setting || '',
-            'endpoint-selector': endpointField?.selector || '',
-            'endpoint-value': endpointValue,
-            'proxy-password': String(config?.proxyPassword || '').trim(),
-            model,
-            'model-setting': getChatSourceModelSettingKey(chatSource),
-            'model-selector': getChatSourceModelSelector(chatSource),
-            'secret-key': secretKey,
-            proxy: '',
-            'secret-id': secretId,
-            name,
-            source: API_CONFIG_MANAGER_KEY,
-            rawSource,
-            chatSourceLabel: getChatSourceLabel(chatSource),
-            group: String(config?.group || '').trim(),
-        };
-    }
-
-    function connectionProfileToApiTarget(profile) {
-        if (!profile?.id || !profile?.name) {
-            return null;
-        }
-        const mainApi = getProfileMainApi(profile);
-        const chatSource = mainApi === MAIN_API_CHAT_COMPLETION
-            ? normalizeApiConfigSource(profile.api || profile['api-url-source'])
-            : mainApi;
-        return {
-            key: `connection:${profile.id}`,
-            source: 'connection',
-            sourceLabel: 'Profile',
-            id: profile.id,
-            name: profile.name,
-            displayName: profile.name,
-            chatSource,
-            chatSourceLabel: getChatSourceLabel(chatSource) || mainApi,
-            group: '',
-            profile: clonePlainObject(profile),
-            ownsConnectionProfile: true,
-        };
-    }
-
-    function apiConfigToApiTarget(config, index) {
-        if (!config || typeof config !== 'object') {
-            return null;
-        }
-        const profile = apiConfigToTargetProfile(config, index);
-        if (
-            profile.api === CHAT_SOURCE_CUSTOM
-            && !profile['api-url']
-            && !profile.model
-            && !profile['secret-id']
-            && !String(config?.key || '').trim()
-        ) {
-            return null;
-        }
-        return {
-            key: profile.id,
-            source: API_CONFIG_MANAGER_KEY,
-            sourceLabel: 'API管理器',
-            id: profile.id,
-            name: profile.name,
-            displayName: profile.name,
-            chatSource: profile.api,
-            chatSourceLabel: profile.chatSourceLabel,
-            group: profile.group,
-            profile,
-            ownsConnectionProfile: false,
-        };
-    }
-
-    function getApiTargetEntries() {
-        const connectionEntries = getConnectionProfilesRaw()
-            .map(connectionProfileToApiTarget)
-            .filter(Boolean);
-        const apiConfigEntries = getApiConfigRecordsRaw()
-            .map(apiConfigToApiTarget)
-            .filter(Boolean);
-        return [...apiConfigEntries, ...connectionEntries];
-    }
-
-    function findApiTargetEntry(value = '') {
-        const search = String(value ?? '');
-        const trimmed = search.trim();
-        const entries = getApiTargetEntries();
-        if (!search && !trimmed) {
-            return getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
-        }
-
-        return entries.find(entry =>
-            entry.key === search
-            || entry.key === trimmed
-            || entry.id === search
-            || entry.id === trimmed
-            || entry.name === search
-            || entry.name === trimmed
-            || String(entry.name || '').trim() === trimmed) || null;
-    }
-
-    function getApiTargetEntryByKey(key) {
-        return getApiTargetEntries().find(entry => entry.key === key) || null;
-    }
-
-    async function getConnectionProfileDetails(value = '') {
-        const entry = findApiTargetEntry(value);
-        if (entry?.profile) {
-            return clonePlainObject(entry.profile);
-        }
-
-        const command = value ? `/profile-get ${quoteSlashArg(value)}` : '/profile-get';
-        return parseJsonObject(await runSlashCommand(command));
-    }
-
-    function describeApiTargetProfile(profile) {
-        if (!profile) {
-            return '';
-        }
-
-        const sourceLabel = getChatSourceLabel(profile.api || profile.rawSource);
-        const endpoint = profile['api-url'] || profile['endpoint-value'] || profile['reverse-proxy'];
-        const parts = [sourceLabel || profile.rawSource || profile.api, endpoint, profile.model]
-            .map(value => String(value ?? '').trim())
-            .filter(Boolean);
-        return parts.length ? parts.join(' / ') : 'API 设置';
-    }
-
-    function getProfileMainApi(profile) {
-        const explicit = getProfileField(profile, 'main-api');
-        if (explicit) {
-            return explicit;
-        }
-
-        const api = getProfileField(profile, 'api');
-        if (profile?.mode === 'cc' || isChatCompletionSource(api)) {
-            return MAIN_API_CHAT_COMPLETION;
-        }
-        return api;
-    }
-
-    function getProfileApiUrlSource(profile) {
-        return getProfileField(profile, 'api-url-source') || getProfileField(profile, 'api');
-    }
-
-    async function emitConnectionProfileLoaded(profile) {
-        const context = getContext();
-        const eventTypes = context?.eventTypes ?? context?.event_types ?? {};
-        const eventType = eventTypes.CONNECTION_PROFILE_LOADED;
-        if (!eventType || typeof context?.eventSource?.emit !== 'function') {
-            return;
-        }
-
-        try {
-            await context.eventSource.emit(eventType, profile?.name || '');
-        } catch (error) {
-            console.warn('[SillyTavern Tool Ball] Failed to emit CONNECTION_PROFILE_LOADED.', error);
-        }
-    }
-
-    function updateConnectionProfilesDropdown(profile) {
-        const select = document.getElementById('connection_profiles');
-        if (!select || !profile?.id) {
-            return;
-        }
-
-        try {
-            select.value = profile.id;
-        } catch {
-            // Ignore UI sync failures; the API settings have already been applied.
-        }
-    }
-
-    async function markConnectionProfileSelected(profile) {
-        const store = getConnectionManagerStore();
-        if (store && profile?.id) {
-            store.selectedProfile = profile.id;
+        if (changed) {
             saveSettings();
         }
-
-        updateConnectionProfilesDropdown(profile);
-        await emitConnectionProfileLoaded(profile);
+        return changed;
     }
 
-    function getProfileField(profile, key) {
-        return String(profile?.[key] ?? '').trim();
+    function getApiConfigs() {
+        repairRelayConfigs();
+        const configs = getApiManagerStore()?.configs;
+        return Array.isArray(configs) ? configs : [];
     }
 
-    function setElementValue(selector, value, { emit = true, addMissingOption = false } = {}) {
+    function getConfigSource(config) {
+        return normalizeSource(config?.source || CHAT_SOURCE_CUSTOM);
+    }
+
+    function getConfigEndpoint(config, source = getConfigSource(config)) {
+        if (source === CHAT_SOURCE_CUSTOM) {
+            return firstString(config?.customUrl, config?.url, config?.endpoint, config?.baseUrl, config?.reverseProxy);
+        }
+        return firstString(config?.reverseProxy, config?.customUrl, config?.url, config?.endpoint, config?.baseUrl);
+    }
+
+    function getConfigSecretId(config, source = getConfigSource(config)) {
+        const secretKey = SOURCE_SECRET_KEYS[source];
+        const secretIds = config?.secretIds && typeof config.secretIds === 'object' ? config.secretIds : {};
+        return firstString(secretIds[secretKey], source === CHAT_SOURCE_CUSTOM ? config?.secretId : '');
+    }
+
+    function makeApiKey(config, index) {
+        const explicit = firstString(config?.id, config?.uuid);
+        if (explicit) {
+            return `api:${explicit}`;
+        }
+        return `api:${index}:${hashString([
+            config?.name,
+            config?.source,
+            getConfigEndpoint(config),
+            config?.model,
+            JSON.stringify(config?.secretIds || {}),
+        ].join('|'))}`;
+    }
+
+    function getApiItems() {
+        return getApiConfigs().map((config, index) => {
+            const source = getConfigSource(config);
+            const endpoint = getConfigEndpoint(config, source);
+            const secretId = getConfigSecretId(config, source);
+            const name = firstString(config?.name, `API 配置 ${index + 1}`);
+            return {
+                key: makeApiKey(config, index),
+                index,
+                name,
+                source,
+                sourceLabel: sourceLabel(source),
+                endpoint,
+                model: firstString(config?.model),
+                secretId,
+                secretKey: SOURCE_SECRET_KEYS[source] || '',
+                config,
+            };
+        });
+    }
+
+    function getFilteredApiItems() {
+        const filter = getSettings().apiFilter.trim().toLocaleLowerCase();
+        const items = getApiItems();
+        state.apiItems = items;
+        if (!filter) {
+            return items;
+        }
+        return items.filter(item => [item.name, item.sourceLabel, item.endpoint, item.model]
+            .join('\n')
+            .toLocaleLowerCase()
+            .includes(filter));
+    }
+
+    function setElementValue(selector, value, { addMissingOption = false, emit = true } = {}) {
         const element = document.querySelector(selector);
         if (!element) {
             return false;
         }
 
         const text = String(value ?? '');
-        if (addMissingOption && element instanceof HTMLSelectElement && text) {
-            const hasOption = Array.from(element.options || []).some(option => option.value === text);
-            if (!hasOption) {
-                element.append(new Option(text, text));
-            }
+        if (addMissingOption && element instanceof HTMLSelectElement && text && !Array.from(element.options).some(option => option.value === text)) {
+            element.add(new Option(text, text));
         }
 
         element.value = text;
         if (emit) {
-            emitInputAndChange(element);
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            try {
+                globalThis.$?.(element).trigger('input').trigger('change');
+            } catch {
+                // jQuery is optional here.
+            }
         }
         return true;
     }
 
-    function setChatCompletionSourceValue(source) {
-        const element = document.querySelector('#chat_completion_source');
-        if (!element) {
-            return null;
+    function setSource(source, oaiSettings) {
+        setElementValue('#chat_completion_source', source, { addMissingOption: true });
+        if (oaiSettings) {
+            oaiSettings.chat_completion_source = source;
         }
-
-        const value = String(source || '').trim();
-        if (element instanceof HTMLSelectElement) {
-            const hasOption = Array.from(element.options || []).some(option => option.value === value);
-            if (!hasOption) {
-                return false;
-            }
-        }
-
-        return setElementValue('#chat_completion_source', value);
     }
 
-    function selectNoProxyPreset() {
-        const proxySelect = document.querySelector('#openai_proxy_preset');
-        if (proxySelect && Array.from(proxySelect.options || []).some(option => option.value === 'None')) {
-            proxySelect.value = 'None';
+    function setReverseProxy(endpoint, proxyPassword, oaiSettings) {
+        setElementValue('#openai_reverse_proxy', endpoint);
+        setElementValue('#openai_proxy_password', proxyPassword || '');
+        if (oaiSettings) {
+            oaiSettings.reverse_proxy = endpoint || '';
+            oaiSettings.proxy_password = proxyPassword || '';
         }
+    }
+
+    function clearReverseProxy(oaiSettings) {
+        setReverseProxy('', '', oaiSettings);
         setElementValue('#openai_reverse_proxy_name', 'None', { emit: false });
     }
 
-    function syncEndpointField(profile, module) {
-        const chatSource = normalizeApiConfigSource(getProfileField(profile, 'api'));
-        const endpointSetting = getProfileField(profile, 'endpoint-setting')
-            || (chatSource === CHAT_SOURCE_CUSTOM ? 'custom_url' : REVERSE_PROXY_ENDPOINT_FIELD.setting);
-        const endpointSelector = getProfileField(profile, 'endpoint-selector');
-        const endpointValue = getProfileField(profile, 'endpoint-value')
-            || (chatSource === CHAT_SOURCE_CUSTOM
-                ? getProfileField(profile, 'api-url')
-                : getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy'));
-        const proxyPassword = getProfileField(profile, 'proxy-password');
+    function setEndpoint(item, oaiSettings) {
+        const endpoint = item.endpoint;
+        const source = item.source;
 
-        if (chatSource === CHAT_SOURCE_CUSTOM) {
-            selectNoProxyPreset();
-            setElementValue('#openai_reverse_proxy', '');
-            setElementValue('#openai_proxy_password', '');
-            if (module?.oai_settings) {
-                module.oai_settings.reverse_proxy = '';
-                module.oai_settings.proxy_password = '';
-            }
-
-            if (endpointValue) {
-                if (module?.oai_settings) {
-                    module.oai_settings.custom_url = endpointValue;
+        if (source === CHAT_SOURCE_CUSTOM) {
+            clearReverseProxy(oaiSettings);
+            if (endpoint) {
+                setElementValue('#custom_api_url_text', endpoint);
+                if (oaiSettings) {
+                    oaiSettings.custom_url = endpoint;
                 }
-                setElementValue('#custom_api_url_text', endpointValue);
             }
             return;
         }
 
-        if (endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting || !endpointSetting) {
-            selectNoProxyPreset();
-            setElementValue('#openai_reverse_proxy', endpointValue);
-            setElementValue('#openai_proxy_password', proxyPassword);
-            if (module?.oai_settings) {
-                module.oai_settings.reverse_proxy = endpointValue;
-                module.oai_settings.proxy_password = proxyPassword;
-            }
-            return;
-        }
-
-        if (module?.oai_settings) {
-            module.oai_settings.reverse_proxy = '';
-            module.oai_settings.proxy_password = '';
-        }
-
-        if (module?.oai_settings) {
-            module.oai_settings[endpointSetting] = endpointValue;
-        }
-        if (endpointSelector) {
-            setElementValue(endpointSelector, endpointValue, { addMissingOption: Boolean(endpointValue) });
-        }
-        setElementValue('#openai_reverse_proxy', '');
-        setElementValue('#openai_proxy_password', '');
-    }
-
-    async function syncChatCompletionFields(profile) {
-        if (getProfileMainApi(profile) !== MAIN_API_CHAT_COMPLETION) {
-            return;
-        }
-
-        const chatSource = normalizeApiConfigSource(getProfileField(profile, 'api') || getProfileApiUrlSource(profile));
-        if (!chatSource) {
-            return;
-        }
-
-        const model = getProfileField(profile, 'model');
-        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(chatSource);
-        const modelSelector = getProfileField(profile, 'model-selector') || getChatSourceModelSelector(chatSource);
-        const module = await getOpenAiModule();
-        const sourceResult = setChatCompletionSourceValue(chatSource);
-        if (sourceResult === false) {
-            throw new Error(`当前 SillyTavern 不支持聊天补全来源：${chatSource}`);
-        }
-
-        if (module?.oai_settings) {
-            module.oai_settings.chat_completion_source = chatSource;
-        }
-
-        syncEndpointField(profile, module);
-
-        if (model) {
-            if (module?.oai_settings) {
-                module.oai_settings[modelSetting] = model;
-            }
-            if (modelSelector) {
-                setElementValue(modelSelector, model, { addMissingOption: true });
-            }
-        }
-    }
-
-    async function applyApiTargetProfile(profile, { markConnectionManager = false } = {}) {
-        if (!profile) {
-            return '';
-        }
-
-        const mainApi = getProfileMainApi(profile);
-        const apiUrlSource = getProfileApiUrlSource(profile);
-        const apiUrl = getProfileField(profile, 'api-url');
-        const model = getProfileField(profile, 'model');
-        const secretId = getProfileField(profile, 'secret-id');
-        const secretKey = getProfileField(profile, 'secret-key');
-
-        state.apiSwitching = true;
-        suppressProfileRestore(7000);
-        try {
-            await enforcePresetConnectionDecouple();
-
-            if (mainApi) {
-                await runSlashCommand(`/api quiet=true ${quoteSlashArg(mainApi)}`);
-            }
-
-            await syncChatCompletionFields(profile);
-
-            if (apiUrl && normalizeApiConfigSource(getProfileField(profile, 'api')) === CHAT_SOURCE_CUSTOM) {
-                const apiArg = apiUrlSource ? ` api=${quoteSlashArg(apiUrlSource)}` : '';
-                await runSlashCommand(`/api-url${apiArg} connect=false quiet=true ${quoteSlashArg(apiUrl)}`);
-            }
-
-            if (model) {
-                await runSlashCommand(`/model quiet=true ${quoteSlashArg(model)}`);
-            }
-
-            if (secretId) {
-                const keyArg = secretKey ? ` key=${quoteSlashArg(secretKey)}` : '';
-                await runSlashCommand(`/secret-id${keyArg} quiet=true ${quoteSlashArg(secretId)}`);
-            }
-
-            if (markConnectionManager) {
-                await markConnectionProfileSelected(profile);
-            }
-            await enforcePresetConnectionDecouple();
-            await saveNativeSettingsNow();
-            if (mainApi === MAIN_API_CHAT_COMPLETION) {
-                triggerChatCompletionConnection();
-            } else {
-                await resetNativeConnectionStatus('connection profile switched');
-            }
-            return profile.name || '';
-        } finally {
-            setTimeout(() => {
-                state.apiSwitching = false;
-            }, 1000);
-        }
-    }
-
-    async function applyConnectionProfileByName(name) {
-        const entry = findApiTargetEntry(name);
-        const profile = entry?.profile || await getConnectionProfileDetails(name);
-        if (!profile) {
-            globalThis.toastr?.warning?.(`没有找到连接配置：${name}`, 'SillyTavern Tool Ball');
-            return '';
-        }
-        return applyApiTargetProfile(profile, { markConnectionManager: entry ? Boolean(entry.ownsConnectionProfile) : true });
-    }
-
-    async function applyApiTargetEntry(entry) {
-        if (!entry?.profile) {
-            return '';
-        }
-
-        return applyApiTargetProfile(entry.profile, {
-            markConnectionManager: Boolean(entry.ownsConnectionProfile),
-        });
-    }
-
-    function setCurrentApiTargetEntry(entry) {
-        state.currentApiTargetKey = entry?.key || '';
-        state.currentApiTarget = entry?.displayName || entry?.name || '';
-        updateToolBallTitle();
-    }
-
-    function getSelectedConnectionProfileTarget() {
-        const store = getConnectionManagerStore();
-        if (!store?.selectedProfile) {
-            return null;
-        }
-        return getApiTargetEntries().find(entry => entry.source === 'connection' && entry.id === store.selectedProfile) || null;
-    }
-
-    async function getNativeMatchingApiTargetEntry() {
-        for (const entry of getApiTargetEntries()) {
-            try {
-                if (await activeTargetMatchesNativeState(entry.profile)) {
-                    return entry;
+        const field = SOURCE_ENDPOINT_FIELDS[source];
+        if (field && source !== CHAT_SOURCE_CUSTOM && !item.config?.reverseProxy) {
+            clearReverseProxy(oaiSettings);
+            if (endpoint) {
+                setElementValue(field.selector, endpoint, { addMissingOption: true });
+                if (oaiSettings) {
+                    oaiSettings[field.setting] = endpoint;
                 }
-            } catch {
-                // A failed comparison should not block manual API-state sync.
             }
-        }
-        return null;
-    }
-
-    function getActiveApiTargetEntry() {
-        const settings = getSettings();
-        let entry = settings.activeApiTargetKey ? getApiTargetEntryByKey(settings.activeApiTargetKey) : null;
-        if (!entry && settings.activeApiTargetName) {
-            entry = findApiTargetEntry(settings.activeApiTargetName);
-        }
-
-        if (!entry && settings.lockedProfileKey) {
-            entry = getApiTargetEntryByKey(settings.lockedProfileKey);
-        }
-        if (!entry && settings.lockedProfile) {
-            entry = findApiTargetEntry(settings.lockedProfile);
-        }
-
-        if (entry && settings.activeApiTargetKey !== entry.key) {
-            settings.activeApiTargetKey = entry.key;
-            settings.activeApiTargetName = entry.name;
-            settings.lockedProfileKey = entry.key;
-            settings.lockedProfile = entry.name;
-            saveSettings();
-        }
-
-        return entry;
-    }
-
-    function setActiveApiTargetEntry(entry) {
-        const settings = getSettings();
-        settings.activeApiTargetKey = entry?.key || '';
-        settings.activeApiTargetName = entry?.name || '';
-        settings.lockedProfileKey = settings.activeApiTargetKey;
-        settings.lockedProfile = settings.activeApiTargetName;
-        saveSettings();
-    }
-
-    async function activeTargetMatchesNativeState(profile) {
-        if (!profile) {
-            return false;
-        }
-
-        const api = normalizeApiConfigSource(getProfileField(profile, 'api'));
-        const mainApi = getProfileMainApi(profile);
-        const apiUrl = getProfileField(profile, 'api-url');
-        const endpointSetting = getProfileField(profile, 'endpoint-setting')
-            || (api === CHAT_SOURCE_CUSTOM ? 'custom_url' : REVERSE_PROXY_ENDPOINT_FIELD.setting);
-        const endpointValue = getProfileField(profile, 'endpoint-value')
-            || (api === CHAT_SOURCE_CUSTOM
-                ? apiUrl
-                : getProfileField(profile, 'reverse-proxy') || getProfileField(profile, 'proxy'));
-        const proxyPassword = getProfileField(profile, 'proxy-password');
-        const model = getProfileField(profile, 'model');
-        const modelSetting = getProfileField(profile, 'model-setting') || getChatSourceModelSettingKey(api);
-        const openAiModule = await getOpenAiModule();
-        const coreModule = await getCoreModule();
-        const oai = openAiModule?.oai_settings;
-        if (!oai) {
-            return false;
-        }
-
-        if (mainApi && coreModule?.main_api && coreModule.main_api !== mainApi) {
-            return false;
-        }
-
-        if (mainApi === MAIN_API_CHAT_COMPLETION && api) {
-            if (oai.chat_completion_source !== api) {
-                return false;
-            }
-
-            if (api === CHAT_SOURCE_CUSTOM && endpointValue && oai.custom_url !== endpointValue) {
-                return false;
-            }
-
-            if (api !== CHAT_SOURCE_CUSTOM && endpointValue && endpointSetting && String(oai[endpointSetting] || '') !== endpointValue) {
-                return false;
-            }
-
-            if (api !== CHAT_SOURCE_CUSTOM && !endpointValue && endpointSetting && endpointSetting !== REVERSE_PROXY_ENDPOINT_FIELD.setting && oai[endpointSetting]) {
-                return false;
-            }
-
-            if (api !== CHAT_SOURCE_CUSTOM && endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting && !endpointValue && (oai.reverse_proxy || oai.proxy_password)) {
-                return false;
-            }
-
-            if (api !== CHAT_SOURCE_CUSTOM && endpointSetting !== REVERSE_PROXY_ENDPOINT_FIELD.setting && (oai.reverse_proxy || oai.proxy_password)) {
-                return false;
-            }
-
-            if (endpointSetting === REVERSE_PROXY_ENDPOINT_FIELD.setting && proxyPassword && oai.proxy_password !== proxyPassword) {
-                return false;
-            }
-
-            if (model && modelSetting && String(oai[modelSetting] || '') !== model) {
-                return false;
-            }
-
-            if (api === CHAT_SOURCE_CUSTOM && (oai.reverse_proxy || oai.proxy_password)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    function escapeHtml(value) {
-        return String(value ?? '').replace(/[&<>"']/g, char => escapeMap[char]);
-    }
-
-    function cssEscape(value) {
-        if (globalThis.CSS?.escape) {
-            return globalThis.CSS.escape(String(value));
-        }
-        return String(value).replace(/["\\]/g, '\\$&');
-    }
-
-    const OFFICIAL_PRESET_CONNECTION_BIND_ID = 'bind_preset_to_connection';
-
-    function getPresetConnectionBindCheckbox() {
-        return document.getElementById(OFFICIAL_PRESET_CONNECTION_BIND_ID);
-    }
-
-    function emitInputAndChange(element) {
-        if (!element) {
             return;
         }
 
-        const eventOptions = { bubbles: true, cancelable: true };
-        try {
-            element.dispatchEvent(new Event('input', eventOptions));
-            element.dispatchEvent(new Event('change', eventOptions));
-        } catch (error) {
-            console.warn('[Chat Search Jump] Failed to emit native input/change events.', error);
-        }
-
-        try {
-            if (typeof globalThis.$ === 'function') {
-                globalThis.$(element).trigger('input').trigger('change');
-            }
-        } catch (error) {
-            console.warn('[Chat Search Jump] Failed to emit jQuery input/change events.', error);
+        if (endpoint || REVERSE_PROXY_SOURCES.has(source)) {
+            setReverseProxy(endpoint, item.config?.proxyPassword || '', oaiSettings);
         }
     }
 
-    async function getOpenAiModule() {
-        if (!state.openAiModulePromise) {
-            state.openAiModulePromise = (async () => {
-                let lastError = null;
-                for (const path of OPENAI_MODULE_PATHS) {
-                    try {
-                        const module = await import(path);
-                        if (module?.oai_settings) {
-                            return module;
-                        }
-                    } catch (error) {
-                        lastError = error;
-                    }
-                }
-                throw lastError || new Error('SillyTavern openai.js module not found.');
-            })();
-        }
-
-        try {
-            return await state.openAiModulePromise;
-        } catch (error) {
-            state.openAiModulePromise = null;
-            if (!state.nativeModuleWarningShown) {
-                state.nativeModuleWarningShown = true;
-                console.warn('[Chat Search Jump] Failed to access SillyTavern openai.js. DOM/event guards will still run.', error);
-            }
-            return null;
-        }
-    }
-
-    async function getCoreModule() {
-        if (!state.coreModulePromise) {
-            state.coreModulePromise = (async () => {
-                let lastError = null;
-                for (const path of CORE_MODULE_PATHS) {
-                    try {
-                        const module = await import(path);
-                        if (typeof module?.saveSettings === 'function') {
-                            return module;
-                        }
-                    } catch (error) {
-                        lastError = error;
-                    }
-                }
-                throw lastError || new Error('SillyTavern script.js module not found.');
-            })();
-        }
-
-        try {
-            return await state.coreModulePromise;
-        } catch (error) {
-            state.coreModulePromise = null;
-            console.warn('[Chat Search Jump] Failed to access SillyTavern script.js.', error);
-            return null;
-        }
-    }
-
-    async function saveNativeSettingsNow() {
-        const core = await getCoreModule();
-        if (typeof core?.saveSettings === 'function') {
-            await core.saveSettings();
+    function setModel(item, oaiSettings) {
+        if (!item.model) {
             return;
         }
 
-        saveSettings();
-    }
+        const settingKey = SOURCE_MODEL_SETTINGS[item.source] || `${item.source}_model`;
+        const selector = SOURCE_MODEL_SELECTORS[item.source] || `#model_${item.source}_select`;
+        if (oaiSettings && settingKey) {
+            oaiSettings[settingKey] = item.model;
+        }
 
-    async function resetNativeConnectionStatus(reason = 'connection profile switched') {
-        const core = await getCoreModule();
-        try {
-            core?.cancelStatusCheck?.(`[Chat Search Jump] ${reason}`);
-            core?.setOnlineStatus?.('no_connection');
-            core?.resultCheckStatus?.();
-        } catch (error) {
-            console.warn('[Chat Search Jump] Failed to reset native connection status.', error);
+        setElementValue(selector, item.model, { addMissingOption: true });
+        if (item.source === CHAT_SOURCE_CUSTOM) {
+            setElementValue('#model_custom_select', item.model, { addMissingOption: true });
         }
     }
 
-    function triggerChatCompletionConnection() {
+    async function activateSecret(item) {
+        if (item.secretId && item.secretKey) {
+            await runSlashCommand(`/secret-id key=${quoteSlashArg(item.secretKey)} quiet=true ${quoteSlashArg(item.secretId)}`);
+            return;
+        }
+
+        if (item.config?.key && item.secretKey) {
+            const label = `ACM: ${item.name}`;
+            const id = await runSlashCommand(`/secret key=${quoteSlashArg(item.secretKey)} label=${quoteSlashArg(label)} quiet=true ${quoteSlashArg(item.config.key)}`);
+            if (id) {
+                if (!item.config.secretIds || typeof item.config.secretIds !== 'object') {
+                    item.config.secretIds = {};
+                }
+                item.config.secretIds[item.secretKey] = id.trim();
+            }
+        }
+    }
+
+    function triggerConnectButton() {
         const button = document.querySelector('#api_button_openai');
         if (!button) {
-            throw new Error('未找到 API 连接按钮，请在 OpenAI/Chat Completions 设置页使用此扩展');
+            throw new Error('未找到 API 连接按钮，请打开 OpenAI/Chat Completions 设置页后重试');
         }
 
+        try {
+            globalThis.$?.(button).trigger('click');
+            return;
+        } catch {
+            // Fall back to native events.
+        }
         button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
     }
 
-    async function setNativePresetConnectionBind(enabled) {
-        const module = await getOpenAiModule();
-        if (!module?.oai_settings || !hasOwn(module.oai_settings, 'bind_preset_to_connection')) {
-            return { available: false, changed: false };
+    function revealChatCompletionSettings() {
+        const leftPanel = document.querySelector('#left-nav-panel');
+        const leftToggle = document.querySelector('#ai-config-button .drawer-toggle');
+        if (leftPanel?.classList.contains('closedDrawer')) {
+            leftToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
         }
 
-        const desired = Boolean(enabled);
-        const changed = module.oai_settings.bind_preset_to_connection !== desired;
-        module.oai_settings.bind_preset_to_connection = desired;
-        state.nativePresetBindKnown = desired;
-        if (changed) {
+        const apiBlock = document.querySelector('#rm_api_block');
+        if (apiBlock?.classList.contains('closedDrawer')) {
+            document.querySelector('#rm_api_block')?.previousElementSibling?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        }
+
+        document.querySelector('#api_button_openai')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+
+    async function applyApiItem(item) {
+        if (!item) {
+            return;
+        }
+
+        state.busyApiKey = item.key;
+        renderApiList();
+
+        try {
+            const openAiModule = await getOpenAiModule();
+            const oaiSettings = openAiModule?.oai_settings || {};
+            setSource(item.source, oaiSettings);
+            setEndpoint(item, oaiSettings);
+            setModel(item, oaiSettings);
+            await activateSecret(item);
             saveSettings();
+
+            const settings = getSettings();
+            settings.activeApiKey = item.key;
+            settings.activeApiName = item.name;
+            saveSettings();
+
+            revealChatCompletionSettings();
+            triggerConnectButton();
+            globalThis.toastr?.success?.(`正在连接：${item.name}`, 'SillyTavern Tool Ball');
+        } catch (error) {
+            console.error('[SillyTavern Tool Ball] API switch failed:', error);
+            globalThis.toastr?.error?.(`切换失败：${error.message}`, 'SillyTavern Tool Ball');
+        } finally {
+            state.busyApiKey = '';
+            renderApiList();
         }
-        return { available: true, changed };
-    }
-
-    async function enforcePresetConnectionDecouple({ notify = false } = {}) {
-        const domResult = applyOfficialPresetConnectionDecouple({ notify: false });
-        const nativeResult = await setNativePresetConnectionBind(false);
-
-        if (notify && (domResult.changed || nativeResult.changed)) {
-            globalThis.toastr?.success?.('已关闭“预设绑定 API 连接”', 'SillyTavern Tool Ball');
-        }
-
-        return {
-            available: domResult.available || nativeResult.available,
-            changed: domResult.changed || nativeResult.changed,
-        };
-    }
-
-    function applyOfficialPresetConnectionDecouple({ notify = false } = {}) {
-        const settings = getSettings();
-        if (!settings.decouplePresetConnection) {
-            return { available: Boolean(getPresetConnectionBindCheckbox()), changed: false };
-        }
-
-        const checkbox = getPresetConnectionBindCheckbox();
-        if (!checkbox) {
-            return { available: false, changed: false };
-        }
-
-        if (!checkbox.checked) {
-            state.nativePresetBindKnown = false;
-            return { available: true, changed: false };
-        }
-
-        checkbox.checked = false;
-        state.nativePresetBindKnown = false;
-        emitInputAndChange(checkbox);
-
-        if (notify) {
-            globalThis.toastr?.success?.('已关闭“预设绑定 API 连接”', 'SillyTavern Tool Ball');
-        }
-
-        return { available: true, changed: true };
-    }
-
-    async function setActiveApiTargetToCurrent({ notify = false } = {}) {
-        const current = getActiveApiTargetEntry() || await getNativeMatchingApiTargetEntry() || getSelectedConnectionProfileTarget();
-        if (!current) {
-            if (notify) {
-                globalThis.toastr?.warning?.('没有读取到当前 API 配置。请先在 API 管理器或 Connection Profiles 中保存一个配置。', 'SillyTavern Tool Ball');
-            }
-            return '';
-        }
-
-        getSettings().lockApiProfile = true;
-        setActiveApiTargetEntry(current);
-        setCurrentApiTargetEntry(current);
-
-        if (notify) {
-            globalThis.toastr?.success?.(`已锁定当前 API 配置：${current.displayName || current.name}`, 'SillyTavern Tool Ball');
-        }
-
-        return current.name;
-    }
-
-    async function seedActiveApiTargetIfNeeded() {
-        const settings = getSettings();
-        const activeEntry = getActiveApiTargetEntry();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || activeEntry) {
-            return activeEntry?.name || '';
-        }
-        return setActiveApiTargetToCurrent({ notify: false });
-    }
-
-    function suppressProfileRestore(durationMs = 1800) {
-        state.suppressProfileRestoreUntil = Date.now() + durationMs;
-    }
-
-    function isProfileRestoreSuppressed() {
-        return Date.now() < state.suppressProfileRestoreUntil;
-    }
-
-    async function restoreActiveApiTargetIfNeeded(reason = 'preset changed') {
-        const settings = getSettings();
-        const activeEntry = getActiveApiTargetEntry();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || !activeEntry) {
-            return;
-        }
-        if (isProfileRestoreSuppressed()) {
-            return;
-        }
-
-        await enforcePresetConnectionDecouple();
-
-        if (state.currentApiTargetKey === activeEntry.key && await activeTargetMatchesNativeState(activeEntry.profile)) {
-            return;
-        }
-
-        suppressProfileRestore(7000);
-        await applyApiTargetEntry(activeEntry);
-        setCurrentApiTargetEntry(activeEntry);
-
-        if (state.toolsOpen) {
-            renderToolPanel();
-        }
-
-        console.info(`[Chat Search Jump] Restored active API target after ${reason}:`, activeEntry.name);
-        globalThis.toastr?.info?.(`已保持 API 配置：${activeEntry.displayName || activeEntry.name}`, 'SillyTavern Tool Ball');
-    }
-
-    async function syncActiveApiTargetToNativeSelection(reason = 'manual API changed') {
-        const settings = getSettings();
-        if (!settings.decouplePresetConnection || !settings.lockApiProfile || state.apiSwitching) {
-            return;
-        }
-
-        const current = await getNativeMatchingApiTargetEntry() || getSelectedConnectionProfileTarget();
-        if (!current) {
-            return;
-        }
-
-        setCurrentApiTargetEntry(current);
-        if (settings.activeApiTargetKey !== current.key) {
-            setActiveApiTargetEntry(current);
-            console.info(`[Chat Search Jump] Updated active API target after ${reason}:`, current.name);
-        }
-
-        if (state.toolsOpen) {
-            renderToolPanel();
-        }
-    }
-
-    function scheduleActiveApiTargetSync(reason = 'manual API changed') {
-        clearTimeout(state.profileSyncTimer);
-        state.profileSyncTimer = setTimeout(() => {
-            syncActiveApiTargetToNativeSelection(reason).catch(error => {
-                console.warn('[Chat Search Jump] Failed to update active API target.', error);
-            });
-        }, 500);
-    }
-
-    function scheduleActiveApiTargetRestore(reason = 'preset changed') {
-        clearTimeout(state.profileRestoreTimer);
-        state.profileRestoreTimer = setTimeout(() => {
-            restoreActiveApiTargetIfNeeded(reason).catch(error => {
-                console.warn('[Chat Search Jump] Failed to restore active API target.', error);
-            });
-        }, 450);
-    }
-
-    function stripConnectionFieldsFromPresetEvent(eventData) {
-        const settings = getSettings();
-        if (!settings.decouplePresetConnection || !eventData) {
-            return;
-        }
-
-        state.presetGuardActiveUntil = Date.now() + 5000;
-
-        if (eventData.settings && hasOwn(eventData.settings, 'bind_preset_to_connection')) {
-            eventData.settings.bind_preset_to_connection = false;
-            state.nativePresetBindKnown = false;
-        }
-
-        const preset = eventData.preset;
-        const settingsToUpdate = eventData.settingsToUpdate;
-        if (preset && settingsToUpdate && typeof settingsToUpdate === 'object') {
-            for (const [presetKey, descriptor] of Object.entries(settingsToUpdate)) {
-                const settingName = Array.isArray(descriptor) ? descriptor[1] : '';
-                const isConnection = Array.isArray(descriptor) && Boolean(descriptor[3]);
-                if (!isConnection) {
-                    continue;
-                }
-                delete preset[presetKey];
-                if (settingName && settingName !== presetKey) {
-                    delete preset[settingName];
-                }
-            }
-        }
-
-        applyOfficialPresetConnectionDecouple();
-        enforcePresetConnectionDecouple().catch(error => {
-            console.warn('[Chat Search Jump] Failed to enforce preset/API decouple before preset change.', error);
-        });
-    }
-
-    function handlePresetChangedForApiGuard() {
-        state.presetGuardActiveUntil = Date.now() + 4000;
-        enforcePresetConnectionDecouple().catch(error => {
-            console.warn('[Chat Search Jump] Failed to enforce preset/API decouple after preset change.', error);
-        });
-        if (state.apiSwitching) {
-            return;
-        }
-        scheduleActiveApiTargetRestore('preset changed');
-    }
-
-    function handleMainApiChangedForApiGuard() {
-        if (state.apiSwitching) {
-            return;
-        }
-
-        if (Date.now() < state.presetGuardActiveUntil) {
-            scheduleActiveApiTargetRestore('API changed during preset change');
-            return;
-        }
-
-        scheduleActiveApiTargetSync('manual API changed');
     }
 
     function stripHtml(value) {
-        const element = document.createElement('div');
-        element.innerHTML = String(value ?? '');
-        return element.textContent || element.innerText || '';
+        const div = document.createElement('div');
+        div.innerHTML = String(value ?? '');
+        return div.textContent || div.innerText || '';
     }
 
-    function collapseWhitespace(value) {
-        return String(value ?? '').replace(/\s+/g, ' ').trim();
-    }
-
-    function normalize(value, caseSensitive) {
-        const text = stripHtml(value);
+    function normalizeText(value, caseSensitive) {
+        const text = stripHtml(value).replace(/\s+/g, ' ').trim();
         return caseSensitive ? text : text.toLocaleLowerCase();
-    }
-
-    function roleLabel(role) {
-        const labels = {
-            user: '用户',
-            assistant: '角色',
-            system: '系统',
-        };
-        return labels[role] || role || '消息';
     }
 
     function getActiveSwipeText(message) {
         if (!Array.isArray(message?.swipes) || !message.swipes.length) {
             return '';
         }
-
-        const swipeId = Number.isInteger(message.swipe_id) ? message.swipe_id : 0;
-        const swipe = message.swipes[Math.max(0, Math.min(swipeId, message.swipes.length - 1))];
-        if (typeof swipe === 'string') {
-            return swipe;
-        }
-        return swipe?.mes || swipe?.message || '';
+        const index = Number.isInteger(message.swipe_id) ? message.swipe_id : 0;
+        const swipe = message.swipes[Math.max(0, Math.min(index, message.swipes.length - 1))];
+        return typeof swipe === 'string' ? swipe : firstString(swipe?.mes, swipe?.message);
     }
 
     function getMessageText(message) {
-        const swipe = getActiveSwipeText(message);
-        if (swipe) {
-            return swipe;
-        }
-        if (typeof message?.mes === 'string') {
-            return message.mes;
-        }
-        if (typeof message?.message === 'string') {
-            return message.message;
-        }
-        return '';
+        return firstString(getActiveSwipeText(message), message?.mes, message?.message);
     }
 
     function getMessageRole(message) {
-        if (message?.role) {
-            return String(message.role);
-        }
-        if (message?.is_user) {
-            return 'user';
-        }
-        if (message?.is_system) {
-            return 'system';
-        }
+        if (message?.role) return String(message.role);
+        if (message?.is_user) return 'user';
+        if (message?.is_system) return 'system';
         return 'assistant';
     }
 
-    function isMessageHidden(message) {
-        return Boolean(
-            message?.is_hidden
-            || message?.is_system
-            || message?.hide_message
-            || message?.extra?.is_hidden
-            || message?.extra?.hide_message
-        );
+    function isHiddenMessage(message) {
+        return Boolean(message?.is_hidden || message?.is_system || message?.hide_message || message?.extra?.is_hidden || message?.extra?.hide_message);
     }
 
-    function mapContextMessage(message, fallbackId) {
-        return {
-            id: fallbackId,
-            name: message?.name || '',
-            role: getMessageRole(message),
-            hidden: isMessageHidden(message),
-            text: getMessageText(message),
-        };
+    function roleLabel(role) {
+        return ({ user: '用户', assistant: '角色', system: '系统' })[role] || role || '消息';
     }
 
-    function toFiniteInteger(value, fallback = null) {
-        const number = Number(value);
-        return Number.isInteger(number) ? number : fallback;
-    }
-
-    async function readMessagesFromTavernHelper() {
-        const helper = globalThis.TavernHelper;
-        const getChatMessages = typeof helper?.getChatMessages === 'function'
-            ? helper.getChatMessages.bind(helper)
-            : (typeof globalThis.getChatMessages === 'function' ? globalThis.getChatMessages.bind(globalThis) : null);
-
-        if (!getChatMessages) {
-            return null;
-        }
-
-        try {
-            const messages = await getChatMessages('0-{{lastMessageId}}', {
-                hide_state: 'all',
-                include_swipes: true,
-            });
-
-            if (!Array.isArray(messages)) {
-                return null;
-            }
-
-            return messages
-                .map((message, index) => ({
-                    id: toFiniteInteger(message?.message_id ?? message?.id, index),
-                    name: message?.name || '',
-                    role: message?.role || getMessageRole(message),
-                    hidden: isMessageHidden(message),
-                    text: getMessageText(message),
-                }))
-                .filter(message => Number.isInteger(message.id));
-        } catch (error) {
-            console.warn('[Chat Search Jump] Tavern Helper message read failed, using SillyTavern context when possible.', error);
-            return null;
-        }
-    }
-
-    async function readMessages() {
+    function getChatMessages() {
         const chat = getContext()?.chat;
-        if (Array.isArray(chat)) {
-            // Context indexes match the rendered .mes[mesid] value, so use them first for reliable jumping.
-            return chat.map(mapContextMessage).filter(message => Number.isInteger(message.id));
+        if (!Array.isArray(chat)) {
+            return [];
         }
-
-        const helperMessages = await readMessagesFromTavernHelper();
-        return helperMessages || [];
+        return chat.map((message, index) => ({
+            id: index,
+            name: firstString(message?.name, roleLabel(getMessageRole(message))),
+            role: getMessageRole(message),
+            hidden: isHiddenMessage(message),
+            text: getMessageText(message),
+        }));
     }
 
-    function makeSnippet(text, query, caseSensitive) {
-        const plain = collapseWhitespace(stripHtml(text));
+    function makePreview(text, query, caseSensitive) {
+        const plain = stripHtml(text).replace(/\s+/g, ' ').trim();
         if (!plain) {
-            return '';
+            return '空消息';
         }
 
         const haystack = caseSensitive ? plain : plain.toLocaleLowerCase();
         const needle = caseSensitive ? query : query.toLocaleLowerCase();
         const index = needle ? haystack.indexOf(needle) : -1;
-        const safeIndex = index >= 0 ? index : 0;
-        const start = Math.max(0, safeIndex - 42);
-        const end = Math.min(plain.length, safeIndex + Math.max(needle.length, 1) + 72);
-        const prefix = start > 0 ? '...' : '';
-        const suffix = end < plain.length ? '...' : '';
-        const snippet = `${prefix}${plain.slice(start, end)}${suffix}`;
+        const start = Math.max(0, (index >= 0 ? index : 0) - 44);
+        const end = Math.min(plain.length, (index >= 0 ? index : 0) + Math.max(needle.length, 1) + 90);
+        const snippet = `${start > 0 ? '...' : ''}${plain.slice(start, end)}${end < plain.length ? '...' : ''}`;
 
-        if (index < 0 || !needle) {
+        if (!needle || index < 0) {
             return escapeHtml(snippet);
         }
 
-        const snippetHaystack = caseSensitive ? snippet : snippet.toLocaleLowerCase();
-        const snippetIndex = snippetHaystack.indexOf(needle);
-        if (snippetIndex < 0) {
+        const local = (caseSensitive ? snippet : snippet.toLocaleLowerCase()).indexOf(needle);
+        if (local < 0) {
             return escapeHtml(snippet);
         }
-
-        return [
-            escapeHtml(snippet.slice(0, snippetIndex)),
-            '<mark>',
-            escapeHtml(snippet.slice(snippetIndex, snippetIndex + needle.length)),
-            '</mark>',
-            escapeHtml(snippet.slice(snippetIndex + needle.length)),
-        ].join('');
+        return `${escapeHtml(snippet.slice(0, local))}<mark>${escapeHtml(snippet.slice(local, local + needle.length))}</mark>${escapeHtml(snippet.slice(local + needle.length))}`;
     }
 
-    function makePlainPreview(text, maxLength = 160) {
-        const plain = collapseWhitespace(stripHtml(text));
-        if (!plain) {
-            return '';
-        }
-        return plain.length > maxLength ? `${plain.slice(0, maxLength)}...` : plain;
-    }
-
-    function escapeHtmlWithBreaks(value) {
-        return escapeHtml(value).split(String.fromCharCode(10)).join('<br>');
-    }
-
-    function normalizeSnapshotNewlines(text) {
-        const newline = String.fromCharCode(10);
-        const carriage = String.fromCharCode(13);
-        return String(text ?? '')
-            .split(carriage + newline).join(newline)
-            .split(carriage).join(newline);
-    }
-
-    function trimSnapshotText(text) {
-        const plain = normalizeSnapshotNewlines(stripHtml(text)).trim();
-        if (!plain) {
-            return { text: '', truncated: false };
-        }
-        if (plain.length <= SNAPSHOT_TEXT_LIMIT) {
-            return { text: plain, truncated: false };
-        }
-        return { text: `${plain.slice(0, SNAPSHOT_TEXT_LIMIT).trimEnd()}...`, truncated: true };
-    }
-
-    function highlightSnapshotText(text, query = state.query, caseSensitive = getSettings().caseSensitive) {
-        const snapshot = trimSnapshotText(text);
-        if (!snapshot.text) {
-            return '<em>空消息</em>';
-        }
-
-        const needleSource = String(query ?? '').trim();
-        if (!needleSource) {
-            return escapeHtmlWithBreaks(snapshot.text);
-        }
-
-        const haystack = caseSensitive ? snapshot.text : snapshot.text.toLocaleLowerCase();
-        const needle = caseSensitive ? needleSource : needleSource.toLocaleLowerCase();
-        const pieces = [];
-        let cursor = 0;
-        let index = haystack.indexOf(needle);
-
-        while (index >= 0) {
-            pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(cursor, index)));
-            pieces.push('<mark>');
-            pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(index, index + needleSource.length)));
-            pieces.push('</mark>');
-            cursor = index + needleSource.length;
-            index = haystack.indexOf(needle, cursor);
-        }
-
-        pieces.push(escapeHtmlWithBreaks(snapshot.text.slice(cursor)));
-        if (snapshot.truncated) {
-            pieces.push('<div class="stcsj-snapshot-truncated">内容较长，快照中已截断。点“跳这层”可回到完整原文。</div>');
-        }
-        return pieces.join('');
-    }
-
-    function messageIdEquals(left, right) {
-        const leftNumber = Number(left);
-        const rightNumber = Number(right);
-        if (Number.isInteger(leftNumber) && Number.isInteger(rightNumber)) {
-            return leftNumber === rightNumber;
-        }
-        return String(left) === String(right);
-    }
-
-    function countOccurrences(text, query, caseSensitive) {
-        const plain = normalize(text, caseSensitive);
-        const needle = caseSensitive ? query : query.toLocaleLowerCase();
-        if (!plain || !needle) {
-            return 0;
-        }
-
-        let count = 0;
-        let index = plain.indexOf(needle);
-        while (index >= 0) {
-            count += 1;
-            index = plain.indexOf(needle, index + needle.length);
-        }
-        return count;
-    }
-
-    async function runSearch() {
-        const token = ++state.searchToken;
+    function runSearch() {
         const settings = getSettings();
-        const query = elements.input?.value?.trim() ?? '';
-        state.query = query;
-
+        const query = settings.searchQuery.trim();
         if (!query) {
-            state.results = [];
-            state.activeIndex = -1;
-            state.activeOccurrence = 0;
-            renderPanelList();
+            state.searchResults = [];
+            state.activeResultIndex = -1;
+            renderSearchResults();
             return;
         }
 
-        state.mode = 'search';
-        setActiveTab();
-        elements.status.textContent = '搜索中...';
-
-        const messages = await readMessages();
-        if (token !== state.searchToken) {
-            return;
-        }
-
-        state.messages = messages;
-        const needle = normalize(query, settings.caseSensitive);
+        const needle = normalizeText(query, settings.caseSensitive);
         const results = [];
-
-        for (const message of messages) {
+        for (const message of getChatMessages()) {
             if (!settings.includeHidden && message.hidden) {
                 continue;
             }
-
-            const searchable = settings.includeNames ? `${message.name}\n${message.text}` : message.text;
-            if (!normalize(searchable, settings.caseSensitive).includes(needle)) {
+            const source = settings.includeNames ? `${message.name}\n${message.text}` : message.text;
+            if (!normalizeText(source, settings.caseSensitive).includes(needle)) {
                 continue;
             }
-
-            const textMatchCount = countOccurrences(message.text, query, settings.caseSensitive);
-            const snippetHtml = makeSnippet(searchable, query, settings.caseSensitive);
             results.push({
-                id: message.id,
-                name: message.name || roleLabel(message.role),
-                role: message.role || '',
-                hidden: message.hidden,
-                matchCount: Math.max(1, textMatchCount),
-                snippet: snippetHtml,
-                preview: makePlainPreview(snippetHtml) || makePlainPreview(searchable) || `第 ${message.id} 楼`,
+                ...message,
+                preview: makePreview(source, query, settings.caseSensitive),
             });
-
             if (results.length >= settings.maxResults) {
                 break;
             }
         }
 
-        state.results = results;
-        state.activeIndex = results.length ? 0 : -1;
-        state.activeOccurrence = 0;
-        renderPanelList();
+        state.searchResults = results;
+        state.activeResultIndex = results.length ? 0 : -1;
+        renderSearchResults();
     }
 
-    let searchTimeout = null;
     function scheduleSearch() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
-    }
-
-    function getFallbackFavoriteStore() {
-        if (fallbackFavoriteStore) {
-            return fallbackFavoriteStore;
-        }
-
-        try {
-            fallbackFavoriteStore = JSON.parse(localStorage.getItem(`${ID}-favorites`) || '{}');
-        } catch {
-            fallbackFavoriteStore = {};
-        }
-
-        if (!Array.isArray(fallbackFavoriteStore.favorites)) {
-            fallbackFavoriteStore.favorites = [];
-        }
-        return fallbackFavoriteStore;
+        clearTimeout(state.searchTimer);
+        state.searchTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
     }
 
     function getFavoriteStore() {
         const context = getContext();
-        const metadata = context?.chatMetadata;
-        if (!metadata) {
-            return getFallbackFavoriteStore();
+        if (context?.chatMetadata) {
+            if (!context.chatMetadata[FAVORITE_KEY] || typeof context.chatMetadata[FAVORITE_KEY] !== 'object') {
+                context.chatMetadata[FAVORITE_KEY] = { favorites: [] };
+            }
+            if (!Array.isArray(context.chatMetadata[FAVORITE_KEY].favorites)) {
+                context.chatMetadata[FAVORITE_KEY].favorites = [];
+            }
+            return context.chatMetadata[FAVORITE_KEY];
         }
 
-        if (!metadata[METADATA_KEY] || typeof metadata[METADATA_KEY] !== 'object') {
-            metadata[METADATA_KEY] = { favorites: [] };
+        if (!fallbackFavoriteStore) {
+            try {
+                fallbackFavoriteStore = JSON.parse(localStorage.getItem(`${ID}-favorites`) || '{}');
+            } catch {
+                fallbackFavoriteStore = {};
+            }
+            if (!Array.isArray(fallbackFavoriteStore.favorites)) {
+                fallbackFavoriteStore.favorites = [];
+            }
         }
-        if (!Array.isArray(metadata[METADATA_KEY].favorites)) {
-            metadata[METADATA_KEY].favorites = [];
-        }
-        return metadata[METADATA_KEY];
+        return fallbackFavoriteStore;
     }
 
     function getFavorites() {
         return getFavoriteStore().favorites;
     }
 
-    function normalizeFavoriteId(id) {
-        return String(toFiniteInteger(id, id));
-    }
-
-    function findFavorite(id) {
-        const key = normalizeFavoriteId(id);
-        return getFavorites().find(item => normalizeFavoriteId(item.id) === key) || null;
-    }
-
-    function isFavorite(id) {
-        return Boolean(findFavorite(id));
-    }
-
-    async function persistFavorites() {
+    async function saveFavorites() {
         const context = getContext();
         try {
             if (context?.chatMetadata && typeof context.saveMetadata === 'function') {
                 await context.saveMetadata();
                 return;
             }
-            localStorage.setItem(`${ID}-favorites`, JSON.stringify(getFallbackFavoriteStore()));
+            const core = await getCoreModule().catch(() => null);
+            if (typeof core?.saveMetadata === 'function') {
+                await core.saveMetadata();
+                return;
+            }
+            localStorage.setItem(`${ID}-favorites`, JSON.stringify(getFavoriteStore()));
         } catch (error) {
-            console.warn('[Chat Search Jump] Failed to save favorites.', error);
+            console.warn('[SillyTavern Tool Ball] Failed to save favorites.', error);
         }
     }
 
-    function favoriteFromResult(result) {
-        return {
-            id: result.id,
-            name: result.name || '',
-            role: result.role || '',
-            hidden: Boolean(result.hidden),
-            preview: result.preview || makePlainPreview(result.snippet) || `第 ${result.id} 楼`,
-            query: state.query || '',
-            createdAt: Date.now(),
-        };
+    function findFavorite(id) {
+        return getFavorites().find(item => String(item.id) === String(id)) || null;
     }
 
-    async function addFavoriteFromResult(result) {
-        if (!result) {
+    async function toggleFavorite(message) {
+        if (!message) {
             return;
         }
 
         const store = getFavoriteStore();
-        const key = normalizeFavoriteId(result.id);
-        const favorite = favoriteFromResult(result);
-        const index = store.favorites.findIndex(item => normalizeFavoriteId(item.id) === key);
-
-        if (index >= 0) {
-            store.favorites[index] = {
-                ...store.favorites[index],
-                ...favorite,
-                updatedAt: Date.now(),
-            };
+        const exists = findFavorite(message.id);
+        if (exists) {
+            store.favorites = store.favorites.filter(item => String(item.id) !== String(message.id));
+            globalThis.toastr?.info?.(`已取消收藏第 ${message.id} 楼`, 'SillyTavern Tool Ball');
         } else {
-            store.favorites.unshift(favorite);
+            store.favorites.unshift({
+                id: message.id,
+                name: message.name,
+                role: message.role,
+                preview: stripHtml(message.preview || message.text).slice(0, 220),
+                createdAt: Date.now(),
+            });
+            globalThis.toastr?.success?.(`已收藏第 ${message.id} 楼`, 'SillyTavern Tool Ball');
         }
-
-        await persistFavorites();
-        globalThis.toastr?.success?.(`已收藏第 ${result.id} 楼`, 'Chat Search Jump');
+        await saveFavorites();
+        renderSearchResults();
+        renderFavorites();
+        updateFavoriteCount();
     }
 
-    async function removeFavorite(id) {
-        const store = getFavoriteStore();
-        const key = normalizeFavoriteId(id);
-        const before = store.favorites.length;
-        store.favorites = store.favorites.filter(item => normalizeFavoriteId(item.id) !== key);
-
-        if (store.favorites.length !== before) {
-            await persistFavorites();
-            globalThis.toastr?.info?.(`已取消收藏第 ${id} 楼`, 'Chat Search Jump');
-        }
+    function findMessageElement(id) {
+        const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(String(id)) : String(id).replace(/"/g, '\\"');
+        return document.querySelector(`.mes[mesid="${escaped}"], .mes[data-message-id="${escaped}"], .mes[data-mes-id="${escaped}"]`);
     }
 
-    async function toggleFavoriteFromResult(result) {
-        if (!result) {
+    async function ensureMessageElement(id) {
+        let element = findMessageElement(id);
+        if (element) {
+            return element;
+        }
+
+        const firstRendered = Math.min(...Array.from(document.querySelectorAll('.mes[mesid]'))
+            .map(node => Number(node.getAttribute('mesid')))
+            .filter(Number.isInteger));
+        if (Number.isFinite(firstRendered) && Number(id) < firstRendered) {
+            const core = await getCoreModule().catch(() => null);
+            await core?.showMoreMessages?.(Math.max(1, firstRendered - Number(id) + 4));
+            element = findMessageElement(id);
+        }
+        return element;
+    }
+
+    async function jumpToMessage(id) {
+        const element = await ensureMessageElement(id);
+        if (!element) {
+            globalThis.toastr?.warning?.(`第 ${id} 楼还没有渲染，先在聊天里加载旧消息后再跳转。`, 'SillyTavern Tool Ball');
+            return;
+        }
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('sttb-flash-message');
+        setTimeout(() => element.classList.remove('sttb-flash-message'), 1600);
+    }
+
+    function renderApiList() {
+        if (!elements.apiList) {
             return;
         }
 
-        if (isFavorite(result.id)) {
-            await removeFavorite(result.id);
-        } else {
-            await addFavoriteFromResult(result);
-        }
-        renderPanelList();
-        updateToolPanelFavoriteCount();
-    }
+        const settings = getSettings();
+        const items = getFilteredApiItems();
+        elements.apiCount.textContent = String(items.length);
 
-    async function clearFavorites() {
-        const store = getFavoriteStore();
-        if (!store.favorites.length) {
+        if (!items.length) {
+            elements.apiList.innerHTML = '<div class="sttb-empty">没有 API 管理器配置</div>';
             return;
         }
 
-        if (!globalThis.confirm?.('确定清空当前聊天的全部收藏吗？')) {
-            return;
-        }
-
-        store.favorites = [];
-        await persistFavorites();
-        renderPanelList();
-        updateToolPanelFavoriteCount();
-        globalThis.toastr?.success?.('已清空当前聊天收藏', 'Chat Search Jump');
-    }
-
-    function renderSearchList() {
-        const count = state.results.length;
-        const activeResult = state.results[state.activeIndex];
-        const hitCount = activeResult?.matchCount ?? 0;
-        const truncated = count >= getSettings().maxResults ? '+' : '';
-
-        elements.status.textContent = state.query ? `${count}${truncated} 条结果` : '输入关键词';
-        elements.prev.disabled = count === 0;
-        elements.next.disabled = count === 0;
-        elements.hitPrev.disabled = hitCount <= 1;
-        elements.hitNext.disabled = hitCount <= 1;
-        elements.hitStatus.textContent = hitCount ? `命中 ${Math.min(state.activeOccurrence + 1, hitCount)}/${hitCount}` : '命中 0/0';
-        elements.hitNav.hidden = hitCount <= 1;
-        elements.clearFavorites.hidden = true;
-
-        if (!count) {
-            elements.list.innerHTML = state.query
-                ? '<div class="stcsj-empty">没有找到</div>'
-                : '<div class="stcsj-empty">搜索当前聊天记录</div>';
-            return;
-        }
-
-        elements.list.innerHTML = state.results.map((result, index) => {
-            const favorite = isFavorite(result.id);
-            const active = index === state.activeIndex ? ' active' : '';
-            const hidden = result.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
+        elements.apiList.innerHTML = items.map(item => {
+            const active = item.key === settings.activeApiKey;
+            const busy = item.key === state.busyApiKey;
+            const endpoint = item.endpoint ? `<span>${escapeHtml(item.endpoint)}</span>` : '<span>无 endpoint</span>';
+            const model = item.model ? `<span>${escapeHtml(item.model)}</span>` : '<span>未指定模型</span>';
+            const secret = item.secretId ? '<span>secret 已保存</span>' : '<span>未绑定 secret</span>';
             return `
-                <div class="stcsj-result-row">
-                    <button type="button" class="stcsj-result${active}" data-stcsj-action="jump-result" data-index="${index}" title="跳转到第 ${escapeHtml(result.id)} 楼">
-                        <span class="stcsj-result-meta">
-                            <span>#${escapeHtml(result.id)}</span>
-                            <span>${escapeHtml(result.name)}</span>
-                            <span>命中 ${escapeHtml(result.matchCount)}</span>
-                            ${hidden}
-                        </span>
-                        <span class="stcsj-result-snippet">${result.snippet}</span>
+                <article class="sttb-api-item${active ? ' active' : ''}">
+                    <button type="button" class="sttb-api-main" data-action="apply-api" data-key="${escapeHtml(item.key)}" ${busy ? 'disabled' : ''}>
+                        <strong>${escapeHtml(item.name)}</strong>
+                        <small>${escapeHtml(item.sourceLabel)}</small>
+                        <em>${endpoint}${model}${secret}</em>
                     </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-result" data-index="${index}" title="查看前后快照" aria-label="查看前后快照">
-                        <i class="fa-solid fa-eye"></i><span>前后</span>
+                    <button type="button" class="sttb-icon-btn" data-action="apply-api" data-key="${escapeHtml(item.key)}" title="连接" ${busy ? 'disabled' : ''}>
+                        <i class="fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-plug-circle-bolt'}"></i>
                     </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-fav${favorite ? ' active' : ''}" data-stcsj-action="toggle-favorite" data-index="${index}" title="${favorite ? '取消收藏' : '收藏这层'}" aria-label="${favorite ? '取消收藏' : '收藏这层'}">
-                        <i class="${favorite ? 'fa-solid' : 'fa-regular'} fa-star"></i>
-                    </button>
-                </div>`;
+                </article>`;
         }).join('');
     }
 
-    function renderFavoriteList() {
+    function renderSearchResults() {
+        if (!elements.searchList) {
+            return;
+        }
+
+        const settings = getSettings();
+        const query = settings.searchQuery.trim();
+        elements.searchStatus.textContent = query
+            ? `${state.searchResults.length} 条结果`
+            : '输入关键词搜索当前聊天';
+
+        if (!query) {
+            elements.searchList.innerHTML = '<div class="sttb-empty">搜索当前聊天记录</div>';
+            return;
+        }
+        if (!state.searchResults.length) {
+            elements.searchList.innerHTML = '<div class="sttb-empty">没有匹配结果</div>';
+            return;
+        }
+
+        elements.searchList.innerHTML = state.searchResults.map((message, index) => {
+            const favorite = Boolean(findFavorite(message.id));
+            return `
+                <article class="sttb-message-item${index === state.activeResultIndex ? ' active' : ''}">
+                    <button type="button" class="sttb-message-main" data-action="jump-message" data-id="${message.id}">
+                        <strong>#${message.id} ${escapeHtml(message.name)}</strong>
+                        <p>${message.preview}</p>
+                    </button>
+                    <button type="button" class="sttb-icon-btn" data-action="toggle-favorite" data-id="${message.id}" title="${favorite ? '取消收藏' : '收藏'}">
+                        <i class="fa-${favorite ? 'solid' : 'regular'} fa-star"></i>
+                    </button>
+                </article>`;
+        }).join('');
+    }
+
+    function renderFavorites() {
+        if (!elements.favoriteList) {
+            return;
+        }
+
         const favorites = getFavorites();
-        elements.status.textContent = `已收藏 ${favorites.length} 条`;
-        elements.prev.disabled = true;
-        elements.next.disabled = true;
-        elements.hitPrev.disabled = true;
-        elements.hitNext.disabled = true;
-        elements.hitStatus.textContent = '命中 0/0';
-        elements.hitNav.hidden = true;
-        elements.clearFavorites.hidden = favorites.length === 0;
-
+        updateFavoriteCount();
         if (!favorites.length) {
-            elements.list.innerHTML = '<div class="stcsj-empty">还没有收藏。先在搜索结果右侧点星标。</div>';
+            elements.favoriteList.innerHTML = '<div class="sttb-empty">当前聊天没有收藏</div>';
             return;
         }
 
-        elements.list.innerHTML = favorites.map(favorite => {
-            const hidden = favorite.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
-            const date = favorite.createdAt ? new Date(favorite.createdAt).toLocaleString() : '';
-            return `
-                <div class="stcsj-result-row">
-                    <button type="button" class="stcsj-result stcsj-favorite-item" data-stcsj-action="jump-favorite" data-id="${escapeHtml(favorite.id)}" title="跳转到第 ${escapeHtml(favorite.id)} 楼">
-                        <span class="stcsj-result-meta">
-                            <span>#${escapeHtml(favorite.id)}</span>
-                            <span>${escapeHtml(favorite.name || roleLabel(favorite.role))}</span>
-                            ${date ? `<span>${escapeHtml(date)}</span>` : ''}
-                            ${hidden}
-                        </span>
-                        <span class="stcsj-result-snippet">${escapeHtml(favorite.preview || `第 ${favorite.id} 楼`)}</span>
-                    </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-snapshot" data-stcsj-action="snapshot-favorite" data-id="${escapeHtml(favorite.id)}" title="查看前后快照" aria-label="查看前后快照">
-                        <i class="fa-solid fa-eye"></i><span>前后</span>
-                    </button>
-                    <button type="button" class="stcsj-icon-btn stcsj-result-fav active" data-stcsj-action="remove-favorite" data-id="${escapeHtml(favorite.id)}" title="取消收藏" aria-label="取消收藏">
-                        <i class="fa-solid fa-star"></i>
-                    </button>
-                </div>`;
-        }).join('');
+        elements.favoriteList.innerHTML = favorites.map(item => `
+            <article class="sttb-message-item">
+                <button type="button" class="sttb-message-main" data-action="jump-message" data-id="${item.id}">
+                    <strong>#${item.id} ${escapeHtml(item.name || roleLabel(item.role))}</strong>
+                    <p>${escapeHtml(item.preview || '')}</p>
+                </button>
+                <button type="button" class="sttb-icon-btn" data-action="remove-favorite" data-id="${item.id}" title="取消收藏">
+                    <i class="fa-solid fa-star"></i>
+                </button>
+            </article>`).join('');
     }
 
     function updateFavoriteCount() {
@@ -1933,1289 +894,280 @@
         }
     }
 
-    function setActiveTab() {
-        if (!elements.searchTab || !elements.favoriteTab) {
-            return;
+    function setActiveTab(tab) {
+        const settings = getSettings();
+        settings.activeTab = tab;
+        saveSettings();
+
+        for (const name of ['api', 'search', 'favorites']) {
+            const active = name === tab;
+            elements.tabs?.querySelector(`[data-tab="${name}"]`)?.classList.toggle('active', active);
+            elements.views?.querySelector(`[data-view="${name}"]`)?.classList.toggle('active', active);
         }
 
-        elements.searchTab.classList.toggle('active', state.mode === 'search');
-        elements.favoriteTab.classList.toggle('active', state.mode === 'favorites');
+        if (tab === 'api') renderApiList();
+        if (tab === 'search') {
+            renderSearchResults();
+            setTimeout(() => elements.searchInput?.focus(), 0);
+        }
+        if (tab === 'favorites') renderFavorites();
     }
 
-    function renderPanelList() {
-        setActiveTab();
-        updateFavoriteCount();
-        if (!elements.list) {
-            return;
+    function setPanelOpen(open) {
+        elements.panel.classList.toggle('open', open);
+        elements.toggle.setAttribute('aria-expanded', String(open));
+        if (open) {
+            const tab = getSettings().activeTab || 'api';
+            setActiveTab(tab);
+            positionPanel();
         }
-
-        if (state.mode === 'favorites') {
-            renderFavoriteList();
-        } else {
-            renderSearchList();
-        }
-    }
-
-    function getCachedMessages() {
-        const chat = getContext()?.chat;
-        if (Array.isArray(chat)) {
-            return chat.map(mapContextMessage).filter(message => Number.isInteger(message.id));
-        }
-        return Array.isArray(state.messages) ? state.messages : [];
-    }
-
-    function findMessageIndexById(messages, messageId) {
-        return messages.findIndex(message => messageIdEquals(message.id, messageId));
-    }
-
-    function findCachedMessageById(messageId) {
-        return getCachedMessages().find(message => messageIdEquals(message.id, messageId)) || null;
-    }
-
-    function renderSnapshotMessages(messages, targetIndex) {
-        const start = Math.max(0, targetIndex - SNAPSHOT_RADIUS);
-        const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_RADIUS);
-        const targetId = messages[targetIndex]?.id;
-        const query = state.query || findFavorite(targetId)?.query || '';
-
-        return messages.slice(start, end + 1).map(message => {
-            const isTarget = messageIdEquals(message.id, targetId);
-            const hidden = message.hidden ? '<span class="stcsj-badge">隐藏</span>' : '';
-            return `
-                <article class="stcsj-snapshot-message${isTarget ? ' target' : ''}">
-                    <div class="stcsj-snapshot-meta">
-                        <span>#${escapeHtml(message.id)}</span>
-                        <strong>${escapeHtml(message.name || roleLabel(message.role))}</strong>
-                        ${hidden}
-                        ${isTarget ? '<span class="stcsj-badge stcsj-badge-target">命中楼层</span>' : ''}
-                        <button type="button" class="stcsj-text-btn stcsj-snapshot-jump-one" data-stcsj-action="jump-snapshot-message" data-id="${escapeHtml(message.id)}">跳这层</button>
-                    </div>
-                    <div class="stcsj-snapshot-text">${highlightSnapshotText(message.text, query)}</div>
-                </article>`;
-        }).join('');
-    }
-
-    async function openSnapshotForMessage(messageId) {
-        const token = ++state.snapshotToken;
-        state.snapshotTargetId = messageId;
-        if (!elements.snapshot || !elements.snapshotList) {
-            return;
-        }
-
-        elements.snapshot.hidden = false;
-        elements.snapshot.classList.add('open');
-        elements.snapshotTitle.textContent = `第 ${messageId} 楼前后快照`;
-        elements.snapshotSub.textContent = '正在读取当前聊天上下文...';
-        elements.snapshotJump.dataset.id = String(messageId);
-        elements.snapshotList.innerHTML = '<div class="stcsj-empty">加载中...</div>';
-
-        try {
-            let messages = getCachedMessages();
-            if (!messages.length || findMessageIndexById(messages, messageId) < 0) {
-                messages = await readMessages();
-                state.messages = messages;
-            }
-            if (token !== state.snapshotToken) {
-                return;
-            }
-
-            const targetIndex = findMessageIndexById(messages, messageId);
-            if (targetIndex < 0) {
-                elements.snapshotSub.textContent = '没有在当前聊天数据里找到这层。';
-                elements.snapshotList.innerHTML = '<div class="stcsj-empty">找不到这条消息。可以先点搜索结果跳转，等旧楼层加载出来后再打开快照。</div>';
-                return;
-            }
-
-            const target = messages[targetIndex];
-            const start = Math.max(0, targetIndex - SNAPSHOT_RADIUS);
-            const end = Math.min(messages.length - 1, targetIndex + SNAPSHOT_RADIUS);
-            elements.snapshotTitle.textContent = `第 ${target.id} 楼前后快照`;
-            elements.snapshotSub.textContent = `显示 #${messages[start].id} - #${messages[end].id}，共 ${end - start + 1} 条。`;
-            elements.snapshotJump.dataset.id = String(target.id);
-            elements.snapshotList.innerHTML = renderSnapshotMessages(messages, targetIndex);
-            requestAnimationFrame(() => {
-                elements.snapshotList.querySelector('.stcsj-snapshot-message.target')?.scrollIntoView({ block: 'center' });
-            });
-        } catch (error) {
-            console.error('[Chat Search Jump] Failed to render snapshot.', error);
-            elements.snapshotSub.textContent = '读取失败';
-            elements.snapshotList.innerHTML = '<div class="stcsj-empty">打开前后快照失败。请刷新页面后再试。</div>';
-        }
-    }
-
-    function closeSnapshot() {
-        if (!elements.snapshot) {
-            return;
-        }
-        elements.snapshot.classList.remove('open');
-        elements.snapshot.hidden = true;
-        state.snapshotTargetId = null;
-    }
-
-    function isSnapshotOpen() {
-        return Boolean(elements.snapshot && !elements.snapshot.hidden && elements.snapshot.classList.contains('open'));
-    }
-
-    function renderToolPanelLoading() {
-        elements.toolPanel.innerHTML = `
-            <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索 / 收藏</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API 切换器</div>
-            <div class="stcsj-tool-empty">读取配置中...</div>`;
-
-        positionToolPanel();
-
-        elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
-            closeToolPanel();
-            openPanel('search');
-        });
-    }
-
-    async function renderToolPanel() {
-        renderToolPanelLoading();
-        await seedActiveApiTargetIfNeeded();
-        const entries = getApiTargetEntries();
-        const currentEntry = getActiveApiTargetEntry() || getSelectedConnectionProfileTarget();
-        if (!state.toolsOpen) {
-            return;
-        }
-
-        setCurrentApiTargetEntry(currentEntry);
-        const currentLabel = state.currentApiTarget;
-
-        applyOfficialPresetConnectionDecouple();
-        const profileHtml = entries.length
-            ? entries.map(entry => {
-                const active = entry.key === state.currentApiTargetKey;
-                const meta = [entry.sourceLabel, entry.group].filter(Boolean).join(' · ');
-                const sourceTag = entry.chatSourceLabel ? `<span class="stcsj-api-source-tag">${escapeHtml(entry.chatSourceLabel)}</span>` : '';
-                return `
-                    <button type="button" class="stcsj-profile-item${active ? ' active' : ''}" data-profile-key="${escapeHtml(entry.key)}">
-                        <span class="stcsj-profile-name">${escapeHtml(entry.displayName || entry.name)}</span>
-                        ${sourceTag}
-                        ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
-                        <i class="fa-solid ${active ? 'fa-check' : 'fa-rotate'}"></i>
-                    </button>`;
-            }).join('')
-            : '<div class="stcsj-tool-empty">没有找到连接配置。请确认 Connection Profiles 或 API 管理器已有记录。</div>';
-
-        elements.toolPanel.innerHTML = `
-            <div class="stcsj-tool-title"><span><i class="fa-solid fa-wand-magic-sparkles"></i> 酒馆工具</span></div>
-            <button type="button" class="stcsj-tool-action" id="${ID}-open-search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索 / 收藏</span><strong class="stcsj-tool-count stcsj-favorite-count">${getFavorites().length}</strong></button>
-            <div class="stcsj-tool-section-title">API 切换器</div>
-            <div class="stcsj-current-profile"><span>当前</span><strong>${escapeHtml(currentLabel || '未知')}</strong></div>
-            <div class="stcsj-profile-list">${profileHtml}</div>
-            <button type="button" class="stcsj-tool-refresh" id="${ID}-refresh-profiles"><i class="fa-solid fa-rotate-right"></i><span>刷新</span></button>`;
-
-        positionToolPanel();
-
-        elements.toolPanel.querySelector(`#${ID}-open-search`)?.addEventListener('click', () => {
-            closeToolPanel();
-            openPanel('search');
-        });
-        elements.toolPanel.querySelector(`#${ID}-refresh-profiles`)?.addEventListener('click', renderToolPanel);
-        elements.toolPanel.querySelectorAll('.stcsj-profile-item').forEach(item => {
-            item.addEventListener('click', async () => {
-                const key = item.getAttribute('data-profile-key');
-                const entry = key ? getApiTargetEntryByKey(key) : null;
-                if (!entry) {
-                    closeToolPanel();
-                    return;
-                }
-
-                item.classList.add('loading');
-                suppressProfileRestore(5000);
-                try {
-                    await applyApiTargetEntry(entry);
-                    setActiveApiTargetEntry(entry);
-                    setCurrentApiTargetEntry(entry);
-                    globalThis.toastr?.success?.(`已切换连接：${entry.displayName || entry.name}（${describeApiTargetProfile(entry.profile)}）`, 'SillyTavern Tool Ball');
-                } catch (error) {
-                    console.warn('[Chat Search Jump] Failed to switch API target.', error);
-                    globalThis.toastr?.error?.(`切换失败：${entry.displayName || entry.name}`, 'SillyTavern Tool Ball');
-                    return;
-                }
-                closeToolPanel();
-            });
-        });
-    }
-
-    function updateToolPanelFavoriteCount() {
-        if (!elements.toolPanel) {
-            return;
-        }
-        elements.toolPanel.querySelectorAll('.stcsj-favorite-count').forEach(node => {
-            node.textContent = String(getFavorites().length);
-        });
-    }
-
-    function findMessageElement(messageId) {
-        const id = cssEscape(messageId);
-        const selectors = [
-            `.mes[mesid="${id}"]`,
-            `.mes[data-message-id="${id}"]`,
-            `.mes[data-mes-id="${id}"]`,
-            `[mesid="${id}"].mes`,
-        ];
-
-        for (const selector of selectors) {
-            const element = document.querySelector(selector);
-            if (element) {
-                return element;
-            }
-        }
-        return null;
-    }
-
-    function getMessageIdFromElement(element) {
-        const raw = element?.getAttribute?.('mesid')
-            ?? element?.getAttribute?.('data-message-id')
-            ?? element?.getAttribute?.('data-mes-id');
-        const id = Number(raw);
-        return Number.isInteger(id) ? id : null;
-    }
-
-    function getRenderedMessageIds() {
-        return Array.from(document.querySelectorAll('.mes[mesid], .mes[data-message-id], .mes[data-mes-id]'))
-            .map(getMessageIdFromElement)
-            .filter(Number.isInteger);
-    }
-
-    function getFirstRenderedMessageId() {
-        const ids = getRenderedMessageIds();
-        return ids.length ? Math.min(...ids) : null;
-    }
-
-    function isProbablyClickable(element) {
-        if (!element) {
-            return false;
-        }
-        if ('disabled' in element && element.disabled) {
-            return false;
-        }
-        if (element.classList?.contains('disabled')) {
-            return false;
-        }
-        const style = globalThis.getComputedStyle?.(element);
-        if (style && (style.display === 'none' || style.visibility === 'hidden')) {
-            return false;
-        }
-        return true;
-    }
-
-    function getShowMoreButton() {
-        const candidates = [
-            document.getElementById('show_more_messages'),
-            document.querySelector('#show_more_messages button, #show_more_messages [role="button"], #show_more_messages .menu_button, #show_more_messages .right_menu_button'),
-            document.querySelector('.show_more_messages, [data-testid="show_more_messages"], [data-action="show_more_messages"]'),
-        ].filter(Boolean);
-
-        for (const host of candidates) {
-            const nested = host.matches('button, [role="button"], .menu_button, .right_menu_button')
-                ? host
-                : host.querySelector('button, [role="button"], .menu_button, .right_menu_button, i, svg');
-
-            if (isProbablyClickable(nested)) {
-                return nested;
-            }
-            if (isProbablyClickable(host)) {
-                return host;
-            }
-        }
-        return null;
-    }
-
-    function emitPointerClick(element) {
-        if (!element) {
-            return false;
-        }
-
-        const eventOptions = { bubbles: true, cancelable: true, view: window };
-        try {
-            element.dispatchEvent(new MouseEvent('pointerdown', eventOptions));
-            element.dispatchEvent(new MouseEvent('mousedown', eventOptions));
-            element.dispatchEvent(new MouseEvent('mouseup', eventOptions));
-            element.dispatchEvent(new MouseEvent('click', eventOptions));
-            return true;
-        } catch (error) {
-            console.warn('[Chat Search Jump] Failed to dispatch pointer click.', error);
-            return false;
-        }
-    }
-
-    function clickShowMore(button) {
-        if (!button) {
-            return false;
-        }
-
-        let clicked = false;
-        try {
-            if (typeof globalThis.$ === 'function') {
-                globalThis.$(button).trigger('click');
-                clicked = true;
-            }
-        } catch (error) {
-            console.warn('[Chat Search Jump] jQuery click on #show_more_messages failed.', error);
-        }
-
-        try {
-            button.click?.();
-            clicked = true;
-        } catch (error) {
-            console.warn('[Chat Search Jump] Native click on #show_more_messages failed.', error);
-        }
-
-        return emitPointerClick(button) || clicked;
-    }
-
-    function scrollChatToTop() {
-        const container = getChatContainer();
-        try {
-            if (container && container !== document.body) {
-                container.scrollTop = 0;
-                container.dispatchEvent(new Event('scroll', { bubbles: true }));
-            }
-            window.scrollTo({ top: 0, behavior: 'auto' });
-        } catch {
-            try {
-                window.scrollTo(0, 0);
-            } catch {
-                // Ignore scroll failures.
-            }
-        }
-    }
-
-    async function importCoreModule() {
-        if (state.coreModulePromise) {
-            return state.coreModulePromise;
-        }
-
-        state.coreModulePromise = (async () => {
-            for (const modulePath of CORE_MODULE_PATHS) {
-                try {
-                    return await import(modulePath);
-                } catch {
-                    // Try the next path. Different ST deployments can use different base URLs.
-                }
-            }
-            return null;
-        })();
-
-        return state.coreModulePromise;
-    }
-
-    async function callCoreShowMoreMessages() {
-        const context = getContext();
-        const localCandidates = [
-            globalThis.showMoreMessages,
-            globalThis.loadMoreMessages,
-            globalThis.loadOlderMessages,
-            context?.showMoreMessages,
-            context?.loadMoreMessages,
-            context?.loadOlderMessages,
-        ];
-
-        for (const candidate of localCandidates) {
-            if (typeof candidate !== 'function') {
-                continue;
-            }
-            try {
-                await candidate.call(context || globalThis);
-                return true;
-            } catch (error) {
-                console.warn('[Chat Search Jump] Core show-more function failed.', error);
-            }
-        }
-
-        const module = await importCoreModule();
-        const moduleCandidates = [module?.showMoreMessages, module?.loadMoreMessages, module?.loadOlderMessages];
-        for (const candidate of moduleCandidates) {
-            if (typeof candidate !== 'function') {
-                continue;
-            }
-            try {
-                await candidate();
-                return true;
-            } catch (error) {
-                console.warn('[Chat Search Jump] Imported show-more function failed.', error);
-            }
-        }
-
-        return false;
-    }
-
-    async function triggerLoadOlderMessages() {
-        scrollChatToTop();
-        await wait(30);
-
-        const button = getShowMoreButton();
-        if (button && clickShowMore(button)) {
-            return true;
-        }
-
-        return callCoreShowMoreMessages();
-    }
-
-    function getChatContainer() {
-        return document.getElementById('chat')
-            || document.querySelector('.chat')
-            || document.querySelector('.mes')?.parentElement
-            || document.body;
-    }
-
-    function wait(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    async function waitForMessageElement(messageId, timeout = 700) {
-        const existing = findMessageElement(messageId);
-        if (existing) {
-            return existing;
-        }
-
-        if (!globalThis.MutationObserver) {
-            await wait(timeout);
-            return findMessageElement(messageId);
-        }
-
-        const container = getChatContainer();
-        return new Promise(resolve => {
-            let settled = false;
-            const finish = element => {
-                if (settled) {
-                    return;
-                }
-                settled = true;
-                clearTimeout(timer);
-                observer.disconnect();
-                resolve(element || null);
-            };
-
-            const observer = new MutationObserver(() => {
-                const element = findMessageElement(messageId);
-                if (element) {
-                    finish(element);
-                }
-            });
-
-            const timer = setTimeout(() => finish(findMessageElement(messageId)), timeout);
-            observer.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['mesid', 'data-message-id', 'data-mes-id'] });
-        });
-    }
-
-    async function ensureMessageRendered(messageId, onProgress = null) {
-        let element = findMessageElement(messageId);
-        if (element) {
-            return element;
-        }
-
-        let lastFirstId = null;
-        let stagnantLoads = 0;
-        let noLoaderWaits = 0;
-
-        for (let attempt = 0; attempt < MAX_AUTO_LOAD_ATTEMPTS; attempt += 1) {
-            const firstRenderedId = getFirstRenderedMessageId();
-            const targetIsOlder = firstRenderedId === null || Number(messageId) < firstRenderedId;
-
-            if (!targetIsOlder) {
-                element = await waitForMessageElement(messageId, 450);
-                if (element) {
-                    return element;
-                }
-
-                // The requested id falls inside the already-rendered range but no .mes exists.
-                // That usually means it is a hidden/system/deleted message, so loading older messages will not help.
-                break;
-            }
-
-            onProgress?.(attempt + 1, firstRenderedId);
-            const loaded = await triggerLoadOlderMessages();
-            if (!loaded) {
-                if (noLoaderWaits < 6) {
-                    noLoaderWaits += 1;
-                    await wait(500);
-                    element = findMessageElement(messageId);
-                    if (element) {
-                        return element;
-                    }
-                    continue;
-                }
-                break;
-            }
-
-            noLoaderWaits = 0;
-            element = await waitForMessageElement(messageId, 1200);
-            if (element) {
-                return element;
-            }
-
-            await wait(150);
-            const nextFirstId = getFirstRenderedMessageId();
-            if (nextFirstId === lastFirstId) {
-                stagnantLoads += 1;
-                if (stagnantLoads >= 4) {
-                    await wait(500);
-                }
-            } else {
-                stagnantLoads = 0;
-            }
-            lastFirstId = nextFirstId;
-        }
-
-        return findMessageElement(messageId);
-    }
-
-    function flashMessage(element) {
-        document.querySelectorAll('.stcsj-hit').forEach(node => node.classList.remove('stcsj-hit'));
-        element.classList.add('stcsj-hit');
-        setTimeout(() => element.classList.remove('stcsj-hit'), 2400);
-    }
-
-    function clearOccurrenceHighlight() {
-        if (globalThis.CSS?.highlights) {
-            CSS.highlights.delete('stcsj-current-hit');
-        }
-    }
-
-    function getMessageSearchRoot(element) {
-        return element.querySelector('.mes_text')
-            || element.querySelector('.mes_block')
-            || element;
-    }
-
-    function createRangeAt(root, start, end) {
-        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-            acceptNode(node) {
-                const parent = node.parentElement;
-                if (parent?.closest('.stcsj-panel, .stcsj-tool-panel, script, style, textarea, input, button')) {
-                    return NodeFilter.FILTER_REJECT;
-                }
-                return NodeFilter.FILTER_ACCEPT;
-            },
-        });
-
-        let offset = 0;
-        let startNode = null;
-        let startOffset = 0;
-        let endNode = null;
-        let endOffset = 0;
-
-        while (walker.nextNode()) {
-            const node = walker.currentNode;
-            const value = node.nodeValue || '';
-            const nextOffset = offset + value.length;
-
-            if (!startNode && start >= offset && start <= nextOffset) {
-                startNode = node;
-                startOffset = start - offset;
-            }
-            if (!endNode && end >= offset && end <= nextOffset) {
-                endNode = node;
-                endOffset = end - offset;
-                break;
-            }
-
-            offset = nextOffset;
-        }
-
-        if (!startNode || !endNode) {
-            return null;
-        }
-
-        const range = document.createRange();
-        range.setStart(startNode, startOffset);
-        range.setEnd(endNode, endOffset);
-        return range;
-    }
-
-    function findOccurrenceRanges(element, query, caseSensitive) {
-        const root = getMessageSearchRoot(element);
-        const text = root.textContent || '';
-        const haystack = caseSensitive ? text : text.toLocaleLowerCase();
-        const needle = caseSensitive ? query : query.toLocaleLowerCase();
-        const ranges = [];
-
-        if (!needle) {
-            return ranges;
-        }
-
-        let index = haystack.indexOf(needle);
-        while (index >= 0) {
-            const range = createRangeAt(root, index, index + needle.length);
-            if (range) {
-                ranges.push(range);
-            }
-            index = haystack.indexOf(needle, index + needle.length);
-        }
-
-        return ranges;
-    }
-
-    function scrollRangeIntoView(range) {
-        const rect = Array.from(range.getClientRects()).find(item => item.width || item.height);
-        if (!rect) {
-            return false;
-        }
-
-        window.scrollTo({
-            top: Math.max(0, rect.top + window.scrollY - window.innerHeight * 0.42),
-            behavior: 'smooth',
-        });
-        return true;
-    }
-
-    function highlightOccurrence(element, occurrenceIndex) {
-        clearOccurrenceHighlight();
-        const result = state.results[state.activeIndex];
-        if (!result || !state.query) {
-            return false;
-        }
-
-        const ranges = findOccurrenceRanges(element, state.query, getSettings().caseSensitive);
-        if (!ranges.length) {
-            return false;
-        }
-
-        const nextIndex = (occurrenceIndex + ranges.length) % ranges.length;
-        state.activeOccurrence = nextIndex;
-        result.matchCount = ranges.length;
-        const range = ranges[nextIndex];
-
-        if (globalThis.CSS?.highlights && globalThis.Highlight) {
-            CSS.highlights.set('stcsj-current-hit', new Highlight(range));
-        }
-
-        scrollRangeIntoView(range);
-        flashMessage(element);
-        renderPanelList();
-        return true;
-    }
-
-    async function jumpToMessageId(messageId, options = {}) {
-        const token = ++state.jumpToken;
-        const numericId = toFiniteInteger(messageId, messageId);
-        const { resultIndex = null, occurrenceIndex = 0, highlight = false } = options;
-
-        if (resultIndex !== null) {
-            state.activeIndex = resultIndex;
-            state.activeOccurrence = occurrenceIndex;
-            state.mode = 'search';
-            renderPanelList();
-        }
-
-        const progress = (attempt, firstRenderedId) => {
-            if (token !== state.jumpToken) {
-                return;
-            }
-            elements.status.textContent = firstRenderedId === null
-                ? `正在加载第 ${numericId} 楼...`
-                : `正在加载旧楼层：第 ${numericId} 楼，当前最早 ${firstRenderedId}`;
-        };
-
-        const element = await ensureMessageRendered(numericId, progress);
-        if (token !== state.jumpToken) {
-            return;
-        }
-
-        if (!element) {
-            renderPanelList();
-            const cachedMessage = findCachedMessageById(numericId);
-            if (cachedMessage) {
-                await openSnapshotForMessage(numericId);
-                const reason = cachedMessage.hidden
-                    ? '这条是隐藏/系统消息，SillyTavern 不会把它渲染成可滚动楼层。'
-                    : '这条消息在聊天数据里，但当前页面没有渲染它。';
-                globalThis.toastr?.info?.(`第 ${numericId} 楼暂时不能跳转，已打开前后快照。${reason}`, 'Chat Search Jump');
-            } else {
-                globalThis.toastr?.warning?.(`找不到第 ${numericId} 楼。可能消息被删除，或旧楼层加载按钮不可用。`, 'Chat Search Jump');
-            }
-            return;
-        }
-
-        await wait(40);
-        if (highlight && !highlightOccurrence(element, occurrenceIndex)) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            flashMessage(element);
-        } else if (!highlight) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            flashMessage(element);
-        }
-
-        renderPanelList();
-    }
-
-    async function jumpToResult(index, occurrenceIndex = 0) {
-        const result = state.results[index];
-        if (!result) {
-            return;
-        }
-
-        if (result.hidden) {
-            state.activeIndex = index;
-            state.activeOccurrence = occurrenceIndex;
-            state.mode = 'search';
-            renderPanelList();
-            await openSnapshotForMessage(result.id);
-            globalThis.toastr?.info?.(`第 ${result.id} 楼是隐藏/系统消息，不能滚动定位，已打开前后快照。`, 'Chat Search Jump');
-            return;
-        }
-
-        jumpToMessageId(result.id, { resultIndex: index, occurrenceIndex, highlight: true });
-    }
-
-    function jumpRelative(delta) {
-        if (!state.results.length) {
-            return;
-        }
-        const nextIndex = (state.activeIndex + delta + state.results.length) % state.results.length;
-        jumpToResult(nextIndex);
-    }
-
-    async function jumpOccurrence(delta) {
-        const result = state.results[state.activeIndex];
-        if (!result) {
-            return;
-        }
-
-        const element = await ensureMessageRendered(result.id);
-        if (!element) {
-            await openSnapshotForMessage(result.id);
-            globalThis.toastr?.info?.(`第 ${result.id} 楼没有渲染，已打开前后快照。`, 'Chat Search Jump');
-            return;
-        }
-
-        const nextOccurrence = (state.activeOccurrence + delta + result.matchCount) % result.matchCount;
-        highlightOccurrence(element, nextOccurrence);
-    }
-
-    function openPanel(mode = 'search') {
-        state.mode = mode;
-        elements.panel.classList.add('open');
-        elements.toggle.setAttribute('aria-expanded', 'true');
-        renderPanelList();
-
-        if (mode === 'search') {
-            setTimeout(() => elements.input.focus(), 0);
-            if (elements.input.value.trim()) {
-                scheduleSearch();
-            }
-        }
-    }
-
-    function closePanel() {
-        closeSnapshot();
-        elements.panel.classList.remove('open');
-        elements.toggle.setAttribute('aria-expanded', 'false');
-    }
-
-    function togglePanel() {
-        if (elements.panel.classList.contains('open')) {
-            closePanel();
-        } else {
-            openPanel('search');
-        }
-    }
-
-    function toggleToolPanel() {
-        if (state.toolsOpen) {
-            closeToolPanel();
-        } else {
-            openToolPanel();
-        }
-    }
-
-    function openToolPanel() {
-        state.toolsOpen = true;
-        elements.toolPanel.classList.add('open');
-        elements.toggle.setAttribute('aria-expanded', 'true');
-        positionToolPanel();
-        renderToolPanel();
-    }
-
-    function closeToolPanel() {
-        state.toolsOpen = false;
-        elements.toolPanel.classList.remove('open');
-        elements.toggle.setAttribute('aria-expanded', 'false');
-    }
-
-    function updateToolBallTitle() {
-        if (!elements.toggle) {
-            return;
-        }
-        const parts = ['酒馆工具'];
-        if (state.currentApiTarget) {
-            parts.push(`当前 API：${state.currentApiTarget}`);
-        }
-        elements.toggle.title = parts.join('｜');
     }
 
     function getBallSettings() {
         const settings = getSettings();
-        if (typeof settings.ballX !== 'number') {
-            settings.ballX = Math.max(12, window.innerWidth - 72);
-        }
-        if (typeof settings.ballY !== 'number') {
-            settings.ballY = Math.round(window.innerHeight * 0.62);
-        }
+        if (typeof settings.ballX !== 'number') settings.ballX = Math.max(16, window.innerWidth - 76);
+        if (typeof settings.ballY !== 'number') settings.ballY = Math.round(window.innerHeight * 0.62);
         return settings;
     }
 
-    function setBallPosition(x, y) {
-        elements.toggle.style.left = `${x}px`;
-        elements.toggle.style.top = `${y}px`;
-    }
-
-    function clampToolBall() {
+    function positionBall() {
         const settings = getBallSettings();
-        const width = elements.toggle.offsetWidth || 50;
-        const height = elements.toggle.offsetHeight || 50;
+        const width = elements.toggle.offsetWidth || 48;
+        const height = elements.toggle.offsetHeight || 48;
         settings.ballX = Math.max(8, Math.min(settings.ballX, window.innerWidth - width - 8));
         settings.ballY = Math.max(8, Math.min(settings.ballY, window.innerHeight - height - 8));
-        setBallPosition(settings.ballX, settings.ballY);
+        elements.toggle.style.left = `${settings.ballX}px`;
+        elements.toggle.style.top = `${settings.ballY}px`;
+        positionPanel();
     }
 
-    function positionToolPanel() {
+    function positionPanel() {
+        if (!elements.panel || !elements.toggle) {
+            return;
+        }
         const settings = getBallSettings();
-        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
-        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
-        const panelWidth = elements.toolPanel?.offsetWidth || Math.min(306, viewportWidth - 16);
-        const maxPanelHeight = Math.min(570, Math.max(180, viewportHeight - 16));
-        const panelHeight = Math.min(elements.toolPanel?.scrollHeight || maxPanelHeight, maxPanelHeight);
-        const ballWidth = elements.toggle.offsetWidth || 50;
-        let left = settings.ballX + ballWidth + 10;
-        let top = settings.ballY - 10;
-
-        if (left + panelWidth > viewportWidth - 8) {
-            left = settings.ballX - panelWidth - 10;
+        const panelWidth = Math.min(420, window.innerWidth - 24);
+        const panelHeight = Math.min(620, window.innerHeight - 24);
+        let left = settings.ballX + 58;
+        let top = settings.ballY - 8;
+        if (left + panelWidth > window.innerWidth - 12) {
+            left = settings.ballX - panelWidth - 12;
         }
-        left = Math.max(8, Math.min(left, viewportWidth - panelWidth - 8));
-
-        if (top + panelHeight > viewportHeight - 8) {
-            top = viewportHeight - panelHeight - 8;
+        if (top + panelHeight > window.innerHeight - 12) {
+            top = window.innerHeight - panelHeight - 12;
         }
-        top = Math.max(8, top);
-
-        elements.toolPanel.style.left = `${left}px`;
-        elements.toolPanel.style.top = `${top}px`;
-        elements.toolPanel.style.maxHeight = `${Math.max(180, Math.min(570, viewportHeight - top - 8))}px`;
+        elements.panel.style.left = `${Math.max(12, left)}px`;
+        elements.panel.style.top = `${Math.max(12, top)}px`;
     }
 
-    function stopToolPanelScrollBubble(event) {
-        if (elements.toolPanel?.contains(event.target)) {
-            event.stopPropagation();
-        }
-    }
-
-    function attachToolPanelScrollGuard() {
-        elements.toolPanel?.addEventListener('wheel', stopToolPanelScrollBubble, { passive: true });
-        elements.toolPanel?.addEventListener('touchmove', stopToolPanelScrollBubble, { passive: true });
-    }
-
-    function attachToolBallDrag() {
-        let dragging = false;
-        let moved = false;
+    function attachDrag() {
         let startX = 0;
         let startY = 0;
         let originX = 0;
         let originY = 0;
+        let moved = false;
 
         elements.toggle.addEventListener('pointerdown', event => {
-            dragging = true;
+            state.dragging = true;
             moved = false;
             startX = event.clientX;
             startY = event.clientY;
             const settings = getBallSettings();
             originX = settings.ballX;
             originY = settings.ballY;
-            elements.toggle.classList.add('dragging');
-            try {
-                elements.toggle.setPointerCapture(event.pointerId);
-            } catch {
-                // Ignore browsers that do not support pointer capture on this element.
-            }
+            elements.toggle.setPointerCapture(event.pointerId);
         });
 
         elements.toggle.addEventListener('pointermove', event => {
-            if (!dragging) {
-                return;
-            }
-
+            if (!state.dragging) return;
             const dx = event.clientX - startX;
             const dy = event.clientY - startY;
-            if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-                moved = true;
-            }
-
+            if (Math.abs(dx) > 4 || Math.abs(dy) > 4) moved = true;
             const settings = getBallSettings();
             settings.ballX = originX + dx;
             settings.ballY = originY + dy;
-            clampToolBall();
-            if (state.toolsOpen) {
-                positionToolPanel();
-            }
+            positionBall();
         });
 
-        const endDrag = event => {
-            if (!dragging) {
-                return;
-            }
-
-            dragging = false;
-            elements.toggle.classList.remove('dragging');
+        const stop = event => {
+            if (!state.dragging) return;
+            state.dragging = false;
             try {
                 elements.toggle.releasePointerCapture(event.pointerId);
             } catch {
-                // Ignore browsers that do not support pointer capture on this element.
+                // Ignore.
             }
-
             if (moved) {
                 saveSettings();
             } else {
-                toggleToolPanel();
+                setPanelOpen(!elements.panel.classList.contains('open'));
             }
         };
-
-        elements.toggle.addEventListener('pointerup', endDrag);
-        elements.toggle.addEventListener('pointercancel', endDrag);
-    }
-
-    function syncSettingsToUi() {
-        const settings = getSettings();
-        elements.caseSensitive.checked = Boolean(settings.caseSensitive);
-        elements.includeHidden.checked = Boolean(settings.includeHidden);
-        elements.includeNames.checked = Boolean(settings.includeNames);
+        elements.toggle.addEventListener('pointerup', stop);
+        elements.toggle.addEventListener('pointercancel', stop);
     }
 
     function createUi() {
         document.getElementById(`${ID}-toggle`)?.remove();
-        document.getElementById(`${ID}-tool-panel`)?.remove();
         document.getElementById(`${ID}-panel`)?.remove();
 
         document.body.insertAdjacentHTML('beforeend', `
-            <button type="button" id="${ID}-toggle" class="stcsj-tool-ball" title="酒馆工具" aria-label="酒馆工具" aria-expanded="false">
+            <button type="button" id="${ID}-toggle" class="sttb-ball" title="酒馆工具" aria-label="酒馆工具" aria-expanded="false">
                 <i class="fa-solid fa-wand-magic-sparkles"></i>
             </button>
-            <div id="${ID}-tool-panel" class="stcsj-tool-panel" aria-live="polite"></div>
-            <section id="${ID}-panel" class="stcsj-panel" aria-label="聊天搜索">
-                <div class="stcsj-header">
-                    <label class="stcsj-search-field">
-                        <i class="fa-solid fa-magnifying-glass"></i>
-                        <input id="${ID}-input" type="search" placeholder="输入关键词" autocomplete="off">
-                    </label>
-                    <button type="button" class="stcsj-text-btn stcsj-api-open" id="${ID}-open-api-from-search" title="打开 API 切换器"><i class="fa-solid fa-plug-circle-bolt"></i><span>API</span></button>
-                    <button type="button" class="stcsj-icon-btn" id="${ID}-close" title="关闭" aria-label="关闭"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div class="stcsj-options">
-                    <label><input id="${ID}-case" type="checkbox"> 区分大小写</label>
-                    <label><input id="${ID}-names" type="checkbox"> 搜索名字</label>
-                    <label><input id="${ID}-hidden" type="checkbox"> 包含隐藏</label>
-                </div>
-                <div class="stcsj-tabs" role="tablist" aria-label="搜索与收藏">
-                    <button type="button" class="stcsj-tab active" id="${ID}-tab-search" data-mode="search">搜索结果</button>
-                    <button type="button" class="stcsj-tab" id="${ID}-tab-favorites" data-mode="favorites">收藏 <span id="${ID}-favorite-count">0</span></button>
-                </div>
-                <div class="stcsj-actions">
-                    <button type="button" class="stcsj-icon-btn" id="${ID}-prev" title="上一条" aria-label="上一条"><i class="fa-solid fa-chevron-up"></i></button>
-                    <span id="${ID}-status">输入关键词</span>
-                    <button type="button" class="stcsj-text-btn" id="${ID}-clear-favorites" hidden>清空收藏</button>
-                    <button type="button" class="stcsj-icon-btn" id="${ID}-next" title="下一条" aria-label="下一条"><i class="fa-solid fa-chevron-down"></i></button>
-                </div>
-                <div class="stcsj-hit-nav" id="${ID}-hit-nav" hidden>
-                    <button type="button" class="stcsj-icon-btn" id="${ID}-hit-prev" title="上一处命中" aria-label="上一处命中"><i class="fa-solid fa-arrow-left"></i></button>
-                    <span id="${ID}-hit-status">命中 0/0</span>
-                    <button type="button" class="stcsj-icon-btn" id="${ID}-hit-next" title="下一处命中" aria-label="下一处命中"><i class="fa-solid fa-arrow-right"></i></button>
-                </div>
-                <div class="stcsj-list" id="${ID}-list"><div class="stcsj-empty">搜索当前聊天记录</div></div>
-            </section>
-            <div id="${ID}-snapshot" class="stcsj-snapshot-overlay" hidden>
-                <div class="stcsj-snapshot-card" role="dialog" aria-modal="true" aria-labelledby="${ID}-snapshot-title">
-                    <div class="stcsj-snapshot-card-header">
-                        <div>
-                            <strong id="${ID}-snapshot-title">前后快照</strong>
-                            <small id="${ID}-snapshot-sub">查看命中楼层附近消息</small>
+            <section id="${ID}-panel" class="sttb-panel" aria-label="酒馆工具">
+                <header class="sttb-header">
+                    <strong>酒馆工具</strong>
+                    <button type="button" class="sttb-icon-btn" id="${ID}-close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+                </header>
+                <nav class="sttb-tabs" id="${ID}-tabs">
+                    <button type="button" data-tab="api"><i class="fa-solid fa-plug-circle-bolt"></i><span>API</span><b id="${ID}-api-count">0</b></button>
+                    <button type="button" data-tab="search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索</span></button>
+                    <button type="button" data-tab="favorites"><i class="fa-solid fa-star"></i><span>收藏</span><b id="${ID}-favorite-count">0</b></button>
+                </nav>
+                <div class="sttb-views" id="${ID}-views">
+                    <section class="sttb-view" data-view="api">
+                        <label class="sttb-field">
+                            <i class="fa-solid fa-filter"></i>
+                            <input type="search" id="${ID}-api-filter" placeholder="筛选 API 配置" autocomplete="off">
+                        </label>
+                        <div class="sttb-list" id="${ID}-api-list"></div>
+                    </section>
+                    <section class="sttb-view" data-view="search">
+                        <label class="sttb-field">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="search" id="${ID}-search-input" placeholder="搜索当前聊天" autocomplete="off">
+                        </label>
+                        <div class="sttb-options">
+                            <label><input type="checkbox" id="${ID}-case"> 区分大小写</label>
+                            <label><input type="checkbox" id="${ID}-names"> 搜索名字</label>
+                            <label><input type="checkbox" id="${ID}-hidden"> 包含隐藏</label>
                         </div>
-                        <div class="stcsj-snapshot-card-actions">
-                            <button type="button" class="stcsj-text-btn" id="${ID}-snapshot-jump">跳到命中楼层</button>
-                            <button type="button" class="stcsj-icon-btn" id="${ID}-snapshot-close" title="关闭快照" aria-label="关闭快照"><i class="fa-solid fa-xmark"></i></button>
-                        </div>
-                    </div>
-                    <div class="stcsj-snapshot-list" id="${ID}-snapshot-list"></div>
+                        <div class="sttb-status" id="${ID}-search-status">输入关键词搜索当前聊天</div>
+                        <div class="sttb-list" id="${ID}-search-list"></div>
+                    </section>
+                    <section class="sttb-view" data-view="favorites">
+                        <div class="sttb-list" id="${ID}-favorite-list"></div>
+                    </section>
                 </div>
-            </div>`);
+            </section>`);
 
         elements.toggle = document.getElementById(`${ID}-toggle`);
-        elements.toolPanel = document.getElementById(`${ID}-tool-panel`);
         elements.panel = document.getElementById(`${ID}-panel`);
-        elements.input = document.getElementById(`${ID}-input`);
         elements.close = document.getElementById(`${ID}-close`);
-        elements.openApiFromSearch = document.getElementById(`${ID}-open-api-from-search`);
-        elements.caseSensitive = document.getElementById(`${ID}-case`);
-        elements.includeHidden = document.getElementById(`${ID}-hidden`);
-        elements.includeNames = document.getElementById(`${ID}-names`);
-        elements.searchTab = document.getElementById(`${ID}-tab-search`);
-        elements.favoriteTab = document.getElementById(`${ID}-tab-favorites`);
+        elements.tabs = document.getElementById(`${ID}-tabs`);
+        elements.views = document.getElementById(`${ID}-views`);
+        elements.apiCount = document.getElementById(`${ID}-api-count`);
+        elements.apiFilter = document.getElementById(`${ID}-api-filter`);
+        elements.apiList = document.getElementById(`${ID}-api-list`);
         elements.favoriteCount = document.getElementById(`${ID}-favorite-count`);
-        elements.prev = document.getElementById(`${ID}-prev`);
-        elements.next = document.getElementById(`${ID}-next`);
-        elements.clearFavorites = document.getElementById(`${ID}-clear-favorites`);
-        elements.hitNav = document.getElementById(`${ID}-hit-nav`);
-        elements.hitPrev = document.getElementById(`${ID}-hit-prev`);
-        elements.hitNext = document.getElementById(`${ID}-hit-next`);
-        elements.hitStatus = document.getElementById(`${ID}-hit-status`);
-        elements.status = document.getElementById(`${ID}-status`);
-        elements.list = document.getElementById(`${ID}-list`);
-        elements.snapshot = document.getElementById(`${ID}-snapshot`);
-        elements.snapshotTitle = document.getElementById(`${ID}-snapshot-title`);
-        elements.snapshotSub = document.getElementById(`${ID}-snapshot-sub`);
-        elements.snapshotJump = document.getElementById(`${ID}-snapshot-jump`);
-        elements.snapshotClose = document.getElementById(`${ID}-snapshot-close`);
-        elements.snapshotList = document.getElementById(`${ID}-snapshot-list`);
+        elements.searchInput = document.getElementById(`${ID}-search-input`);
+        elements.caseSensitive = document.getElementById(`${ID}-case`);
+        elements.includeNames = document.getElementById(`${ID}-names`);
+        elements.includeHidden = document.getElementById(`${ID}-hidden`);
+        elements.searchStatus = document.getElementById(`${ID}-search-status`);
+        elements.searchList = document.getElementById(`${ID}-search-list`);
+        elements.favoriteList = document.getElementById(`${ID}-favorite-list`);
 
-        clampToolBall();
-        attachToolBallDrag();
-        attachToolPanelScrollGuard();
-        syncSettingsToUi();
+        const settings = getSettings();
+        elements.apiFilter.value = settings.apiFilter;
+        elements.searchInput.value = settings.searchQuery;
+        elements.caseSensitive.checked = Boolean(settings.caseSensitive);
+        elements.includeNames.checked = Boolean(settings.includeNames);
+        elements.includeHidden.checked = Boolean(settings.includeHidden);
+
+        attachDrag();
+        positionBall();
+        bindEvents();
+        setActiveTab(settings.activeTab || 'api');
         updateFavoriteCount();
+    }
 
-        elements.close.addEventListener('click', closePanel);
-        elements.openApiFromSearch?.addEventListener('click', () => {
-            closePanel();
-            openToolPanel();
+    function bindEvents() {
+        elements.close.addEventListener('click', () => setPanelOpen(false));
+        elements.tabs.addEventListener('click', event => {
+            const button = event.target.closest('[data-tab]');
+            if (button) {
+                setActiveTab(button.dataset.tab);
+            }
         });
-        elements.input.addEventListener('input', () => {
-            closeSnapshot();
-            state.mode = 'search';
+
+        elements.apiFilter.addEventListener('input', () => {
+            getSettings().apiFilter = elements.apiFilter.value;
+            saveSettings();
+            renderApiList();
+        });
+
+        elements.searchInput.addEventListener('input', () => {
+            getSettings().searchQuery = elements.searchInput.value;
+            saveSettings();
             scheduleSearch();
         });
-        elements.caseSensitive.addEventListener('change', () => setSetting('caseSensitive', elements.caseSensitive.checked));
-        elements.includeHidden.addEventListener('change', () => setSetting('includeHidden', elements.includeHidden.checked));
-        elements.includeNames.addEventListener('change', () => setSetting('includeNames', elements.includeNames.checked));
-        elements.prev.addEventListener('click', () => jumpRelative(-1));
-        elements.next.addEventListener('click', () => jumpRelative(1));
-        elements.hitPrev.addEventListener('click', () => jumpOccurrence(-1));
-        elements.hitNext.addEventListener('click', () => jumpOccurrence(1));
-        elements.clearFavorites.addEventListener('click', clearFavorites);
 
-        elements.snapshotClose.addEventListener('click', closeSnapshot);
-        elements.snapshot.addEventListener('click', event => {
-            if (event.target === elements.snapshot) {
-                closeSnapshot();
-            }
+        elements.caseSensitive.addEventListener('change', () => {
+            getSettings().caseSensitive = elements.caseSensitive.checked;
+            saveSettings();
+            scheduleSearch();
         });
-        elements.snapshotJump.addEventListener('click', () => {
-            const id = elements.snapshotJump.dataset.id || state.snapshotTargetId;
-            closeSnapshot();
-            jumpToMessageId(id, { highlight: false });
+        elements.includeNames.addEventListener('change', () => {
+            getSettings().includeNames = elements.includeNames.checked;
+            saveSettings();
+            scheduleSearch();
         });
-        elements.snapshotList.addEventListener('click', event => {
-            const actionElement = event.target.closest('[data-stcsj-action="jump-snapshot-message"]');
-            if (!actionElement || !elements.snapshotList.contains(actionElement)) {
-                return;
-            }
-            event.preventDefault();
-            const id = actionElement.dataset.id;
-            closeSnapshot();
-            jumpToMessageId(id, { highlight: false });
+        elements.includeHidden.addEventListener('change', () => {
+            getSettings().includeHidden = elements.includeHidden.checked;
+            saveSettings();
+            scheduleSearch();
         });
 
-        [elements.searchTab, elements.favoriteTab].forEach(tab => {
-            tab.addEventListener('click', () => {
-                closeSnapshot();
-                state.mode = tab.dataset.mode === 'favorites' ? 'favorites' : 'search';
-                renderPanelList();
-            });
-        });
-
-        elements.list.addEventListener('click', event => {
-            const actionElement = event.target.closest('[data-stcsj-action]');
-            if (!actionElement || !elements.list.contains(actionElement)) {
+        elements.panel.addEventListener('click', async event => {
+            const action = event.target.closest('[data-action]');
+            if (!action) {
                 return;
             }
-
-            event.preventDefault();
-            event.stopPropagation();
-
-            const action = actionElement.dataset.stcsjAction;
-            if (action === 'jump-result') {
-                jumpToResult(Number(actionElement.dataset.index));
-                return;
-            }
-            if (action === 'toggle-favorite') {
-                toggleFavoriteFromResult(state.results[Number(actionElement.dataset.index)]);
-                return;
-            }
-            if (action === 'snapshot-result') {
-                const result = state.results[Number(actionElement.dataset.index)];
-                if (result) {
-                    openSnapshotForMessage(result.id);
-                }
-                return;
-            }
-            if (action === 'snapshot-favorite') {
-                openSnapshotForMessage(actionElement.dataset.id);
-                return;
-            }
-            if (action === 'jump-favorite') {
-                jumpToMessageId(actionElement.dataset.id, { highlight: false });
-                return;
-            }
-            if (action === 'remove-favorite') {
-                removeFavorite(actionElement.dataset.id).then(() => {
-                    renderPanelList();
-                    updateToolPanelFavoriteCount();
-                });
+            const { action: actionName, key, id } = action.dataset;
+            if (actionName === 'apply-api') {
+                const item = getApiItems().find(candidate => candidate.key === key);
+                await applyApiItem(item);
+            } else if (actionName === 'jump-message') {
+                await jumpToMessage(Number(id));
+            } else if (actionName === 'toggle-favorite') {
+                const message = state.searchResults.find(result => String(result.id) === String(id));
+                await toggleFavorite(message);
+            } else if (actionName === 'remove-favorite') {
+                const message = getFavorites().find(item => String(item.id) === String(id));
+                await toggleFavorite(message);
             }
         });
 
-        document.addEventListener('keydown', event => {
-            if (event.key === 'Escape' && isSnapshotOpen()) {
-                closeSnapshot();
-                return;
-            }
-            if (event.key === 'Escape' && state.toolsOpen) {
-                closeToolPanel();
-                return;
-            }
-            if (event.key === 'Escape' && elements.panel.classList.contains('open')) {
-                closePanel();
-                return;
-            }
-            if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLocaleLowerCase() === 'f') {
-                event.preventDefault();
-                closeToolPanel();
-                togglePanel();
-                return;
-            }
-            if (!elements.panel.classList.contains('open') || state.mode !== 'search') {
-                return;
-            }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === 'g') {
-                event.preventDefault();
-                jumpRelative(event.shiftKey ? -1 : 1);
-            }
-        });
-
-        document.addEventListener('pointerdown', event => {
-            if (!state.toolsOpen) {
-                return;
-            }
-            if (elements.toolPanel.contains(event.target) || elements.toggle.contains(event.target)) {
-                return;
-            }
-            closeToolPanel();
-        });
-
-        window.addEventListener('resize', () => {
-            clampToolBall();
-            if (state.toolsOpen) {
-                positionToolPanel();
-            }
-        });
-    }
-
-    function clearOnChatChange() {
-        if (!elements.input) {
-            return;
-        }
-
-        elements.input.value = '';
-        state.query = '';
-        state.results = [];
-        state.messages = [];
-        state.activeIndex = -1;
-        state.activeOccurrence = 0;
-        state.mode = 'search';
-        clearOccurrenceHighlight();
-        closeSnapshot();
-        renderPanelList();
-        updateToolPanelFavoriteCount();
-    }
-
-    function subscribeToEvents() {
-        const context = getContext();
-        const eventTypes = context?.eventTypes ?? context?.event_types ?? {};
-        const eventSource = context?.eventSource;
-        if (!eventSource || typeof eventSource.on !== 'function') {
-            return;
-        }
-
-        const on = (eventName, handler) => {
-            const eventType = eventTypes[eventName];
-            if (eventType) {
-                eventSource.on(eventType, handler);
-            }
-        };
-
-        on('CHAT_CHANGED', clearOnChatChange);
-        on('MESSAGE_EDITED', scheduleSearch);
-        on('MESSAGE_DELETED', scheduleSearch);
-        on('MESSAGE_SWIPED', scheduleSearch);
-        on('MESSAGE_UPDATED', scheduleSearch);
-        on('USER_MESSAGE_RENDERED', scheduleSearch);
-        on('CHARACTER_MESSAGE_RENDERED', scheduleSearch);
-
-        on('OAI_PRESET_CHANGED_BEFORE', stripConnectionFieldsFromPresetEvent);
-        on('OAI_PRESET_CHANGED_AFTER', handlePresetChangedForApiGuard);
-        on('PRESET_CHANGED', handlePresetChangedForApiGuard);
-        on('SETTINGS_UPDATED', () => enforcePresetConnectionDecouple({ notify: false }));
-        on('MAIN_API_CHANGED', handleMainApiChangedForApiGuard);
-        on('CHATCOMPLETION_SOURCE_CHANGED', handleMainApiChangedForApiGuard);
-        on('GENERATION_STARTED', () => restoreActiveApiTargetIfNeeded('generation started'));
+        window.addEventListener('resize', positionBall);
     }
 
     function init() {
-        if (state.initialized) {
-            return;
-        }
-
-        state.initialized = true;
         createUi();
-        subscribeToEvents();
-
-        Promise.resolve().then(async () => {
-            await seedActiveApiTargetIfNeeded();
-            setCurrentApiTargetEntry(getActiveApiTargetEntry() || getSelectedConnectionProfileTarget());
-            await enforcePresetConnectionDecouple({ notify: false });
-            updateToolBallTitle();
-        }).catch(error => {
-            console.warn('[Chat Search Jump] Failed to initialize API guard.', error);
-        });
-
-        window.setInterval(() => {
-            enforcePresetConnectionDecouple({ notify: false }).catch(error => {
-                console.warn('[Chat Search Jump] Periodic preset/API decouple failed.', error);
-            });
-        }, API_GUARD_ENFORCE_MS);
-
-        window.setInterval(async () => {
-            await restoreActiveApiTargetIfNeeded('periodic check');
-            setCurrentApiTargetEntry(getActiveApiTargetEntry() || getSelectedConnectionProfileTarget());
-        }, PROFILE_LOCK_POLL_MS);
-
-        console.info('[Chat Search Jump] loaded');
+        repairRelayConfigs();
+        renderApiList();
+        renderFavorites();
+        if (getSettings().searchQuery.trim()) {
+            runSearch();
+        }
     }
 
     function waitForSillyTavern(attempt = 0) {
-        const context = getContext();
-        const eventTypes = context?.eventTypes ?? context?.event_types;
-        if (context?.eventSource && eventTypes?.APP_READY) {
-            context.eventSource.on(eventTypes.APP_READY, init);
-            setTimeout(init, 800);
-            return;
-        }
-
-        if ((context?.chat || context?.extensionSettings) && document.body) {
+        if (getContext()?.extensionSettings) {
             init();
             return;
         }
-
-        if (attempt > 80) {
-            console.warn('[Chat Search Jump] SillyTavern context was not found.');
+        if (attempt > 120) {
+            console.warn('[SillyTavern Tool Ball] SillyTavern context was not ready.');
             return;
         }
-
         setTimeout(() => waitForSillyTavern(attempt + 1), 250);
     }
 
-    waitForSillyTavern();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => waitForSillyTavern());
+    } else {
+        waitForSillyTavern();
+    }
 })();
