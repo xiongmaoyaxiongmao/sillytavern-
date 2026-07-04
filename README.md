@@ -2,6 +2,11 @@
 
 一个 SillyTavern 统一悬浮球：聊天搜索、搜索结果跳转、消息收藏、Connection Profile 快捷切换、API / Settings Preset 解耦都放在同一个入口里。
 
+## v0.6.1
+
+- API 管理器记录不再根据 `claude-*` 模型名、Anthropic URL、Cloudflare Anthropic 网关路径自动改成 Claude source。
+- 配置里的 `source` 是唯一准则：`custom` 永远按 Custom (OpenAI兼容) 中转站处理；只有显式 `source: "claude"` / `anthropic` 才切到 Claude / Anthropic。
+
 ## v0.6.0
 
 - 重做悬浮球里的 API 切换器：API 管理器记录优先展示，并按 SillyTavern 的 Chat Completion Source 打标签，例如 OpenRouter、Groq、DeepSeek、Claude / Anthropic、Custom (OpenAI兼容)。
@@ -13,7 +18,7 @@
 ## v0.5.16
 
 - API 管理器记录现在会先归一化为真实 Chat Completion 目标：`custom`、`claude`、`makersuite`，不再把所有 URL 都压成 Custom OpenAI。
-- Cloudflare AI Gateway 的 Anthropic 地址、`anthropic` 来源、`claude-*` 模型会走 Claude source + reverse proxy + Claude model，不再写入 `custom_url`。
+- 旧版曾让 Cloudflare AI Gateway 的 Anthropic 地址、`anthropic` 来源、`claude-*` 模型走 Claude source；v0.6.1 起只保留显式 `source` 规则，不再按模型名或 URL 自动推断。
 - 切换后当前状态校验同步支持 Claude reverse proxy，后台守护不会再把 CF Anthropic 目标误判成 Custom OpenAI 目标。
 
 ## v0.5.15

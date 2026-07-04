@@ -393,28 +393,10 @@
         return normalized === CHAT_SOURCE_CUSTOM || hasOwn(CHAT_SOURCE_LABELS, normalized);
     }
 
-    function looksLikeClaudeModel(model) {
-        return /^claude(?:[-_/]|$)/i.test(String(model || '').trim());
-    }
-
-    function looksLikeAnthropicUrl(url) {
-        const text = String(url || '').trim().toLowerCase();
-        if (!text) {
-            return false;
-        }
-
-        return text.includes('api.anthropic.com')
-            || /gateway\.ai\.cloudflare\.com\/v1\/[^/]+\/[^/]+\/anthropic(?:\/|$)/i.test(text)
-            || /\/anthropic(?:\/|$)/i.test(text);
-    }
-
-    function getApiConfigChatSource(config, apiUrl, model) {
+    function getApiConfigChatSource(config) {
         const rawSource = normalizeApiConfigSource(config?.source);
         if (rawSource && rawSource !== CHAT_SOURCE_CUSTOM) {
             return rawSource;
-        }
-        if (looksLikeClaudeModel(model) || looksLikeAnthropicUrl(apiUrl) || looksLikeAnthropicUrl(config?.reverseProxy)) {
-            return CHAT_SOURCE_CLAUDE;
         }
         return CHAT_SOURCE_CUSTOM;
     }
@@ -499,11 +481,9 @@
     }
 
     function apiConfigToTargetProfile(config, index) {
-        const rawUrl = getFirstString(config?.customUrl, config?.url);
-        const rawReverseProxy = getFirstString(config?.reverseProxy);
         const model = String(config?.model || '').trim();
         const rawSource = String(config?.source || '').trim();
-        const chatSource = getApiConfigChatSource(config, rawUrl || rawReverseProxy, model);
+        const chatSource = getApiConfigChatSource(config);
         const endpointField = getApiConfigEndpointField(config, chatSource);
         const endpointValue = endpointField ? getConfigEndpointForSource(config, chatSource) : '';
         const secretKey = getChatSourceSecretKey(chatSource);
