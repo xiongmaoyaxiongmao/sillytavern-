@@ -222,10 +222,6 @@
         }
     }
 
-    function wait(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
     async function importFirst(paths) {
         let lastError = null;
         for (const path of paths) {
@@ -425,23 +421,18 @@
         return true;
     }
 
-    async function ensureMainApiChatCompletion(coreModule) {
+    async function ensureMainApiChatCompletion() {
         const mainApiSelect = document.querySelector('#main_api');
-        const currentMainApi = firstString(coreModule?.main_api, mainApiSelect?.value);
-        if (currentMainApi === MAIN_API_CHAT_COMPLETION && (!mainApiSelect || mainApiSelect.value === MAIN_API_CHAT_COMPLETION)) {
+        if (mainApiSelect) {
+            if (mainApiSelect.value !== MAIN_API_CHAT_COMPLETION) {
+                setElementValue('#main_api', MAIN_API_CHAT_COMPLETION, { addMissingOption: true });
+            }
             return;
         }
 
-        const changedSelect = setElementValue('#main_api', MAIN_API_CHAT_COMPLETION, { addMissingOption: true });
-        if (!changedSelect && typeof coreModule?.changeMainAPI === 'function') {
+        const coreModule = await getCoreModule();
+        if (coreModule?.main_api !== MAIN_API_CHAT_COMPLETION && typeof coreModule?.changeMainAPI === 'function') {
             coreModule.changeMainAPI(MAIN_API_CHAT_COMPLETION);
-        }
-
-        await wait(80);
-
-        if (coreModule?.main_api && coreModule.main_api !== MAIN_API_CHAT_COMPLETION && typeof coreModule.changeMainAPI === 'function') {
-            coreModule.changeMainAPI(MAIN_API_CHAT_COMPLETION);
-            await wait(40);
         }
     }
 
@@ -453,8 +444,8 @@
     }
 
     function setReverseProxy(endpoint, proxyPassword, oaiSettings) {
-        setElementValue('#openai_reverse_proxy', endpoint);
-        setElementValue('#openai_proxy_password', proxyPassword || '');
+        setElementValue('#openai_reverse_proxy', endpoint, { emit: false });
+        setElementValue('#openai_proxy_password', proxyPassword || '', { emit: false });
         if (oaiSettings) {
             oaiSettings.reverse_proxy = endpoint || '';
             oaiSettings.proxy_password = proxyPassword || '';
@@ -473,7 +464,7 @@
         if (source === CHAT_SOURCE_CUSTOM) {
             clearReverseProxy(oaiSettings);
             if (endpoint) {
-                setElementValue('#custom_api_url_text', endpoint);
+                setElementValue('#custom_api_url_text', endpoint, { emit: false });
                 if (oaiSettings) {
                     oaiSettings.custom_url = endpoint;
                 }
@@ -485,7 +476,7 @@
         if (field && source !== CHAT_SOURCE_CUSTOM && !item.config?.reverseProxy) {
             clearReverseProxy(oaiSettings);
             if (endpoint) {
-                setElementValue(field.selector, endpoint, { addMissingOption: true });
+                setElementValue(field.selector, endpoint, { addMissingOption: true, emit: false });
                 if (oaiSettings) {
                     oaiSettings[field.setting] = endpoint;
                 }
@@ -509,9 +500,9 @@
             oaiSettings[settingKey] = item.model;
         }
 
-        setElementValue(selector, item.model, { addMissingOption: true });
+        setElementValue(selector, item.model, { addMissingOption: true, emit: false });
         if (item.source === CHAT_SOURCE_CUSTOM) {
-            setElementValue('#model_custom_select', item.model, { addMissingOption: true });
+            setElementValue('#model_custom_select', item.model, { addMissingOption: true, emit: false });
         }
     }
 
@@ -533,21 +524,6 @@
         }
     }
 
-    function revealChatCompletionSettings() {
-        const leftPanel = document.querySelector('#left-nav-panel');
-        const leftToggle = document.querySelector('#ai-config-button .drawer-toggle');
-        if (leftPanel?.classList.contains('closedDrawer')) {
-            leftToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        }
-
-        const apiBlock = document.querySelector('#rm_api_block');
-        if (apiBlock?.classList.contains('closedDrawer')) {
-            document.querySelector('#rm_api_block')?.previousElementSibling?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        }
-
-        document.querySelector('#api_button_openai')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-
     async function applyApiItem(item) {
         if (!item) {
             return;
@@ -557,22 +533,19 @@
         renderApiList();
 
         try {
-            const coreModule = await getCoreModule();
             const openAiModule = await getOpenAiModule();
             const oaiSettings = openAiModule?.oai_settings || {};
-            await ensureMainApiChatCompletion(coreModule);
+            await ensureMainApiChatCompletion();
             setSource(item.source, oaiSettings, { emit: false });
             setEndpoint(item, oaiSettings);
             setModel(item, oaiSettings);
             await activateSecret(item);
-            saveSettings();
 
             const settings = getSettings();
             settings.activeApiKey = item.key;
             settings.activeApiName = item.name;
             saveSettings();
 
-            revealChatCompletionSettings();
             setSource(item.source, oaiSettings);
             globalThis.toastr?.success?.(`正在连接：${item.name}`, 'SillyTavern Tool Ball');
         } catch (error) {

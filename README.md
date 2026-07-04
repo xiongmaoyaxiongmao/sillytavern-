@@ -5,6 +5,11 @@
 - API 管理器配置快捷连接。
 - 当前聊天文字搜索与收藏。
 
+## v0.7.2
+
+- API 切换不再展开设置栏、滚动到连接按钮或把页面带离聊天。
+- endpoint、model、proxy password 改为静默写入，最后只触发一次 Chat Completions 重连。
+
 ## v0.7.1
 
 - API 切换前先把 SillyTavern 主 API 切到 Chat Completions/OpenAI。
