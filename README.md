@@ -5,6 +5,11 @@
 - API 管理器配置快捷连接。
 - 当前聊天文字搜索与收藏。
 
+## v0.7.3
+
+- API 切换按钮和 API 标签图标改为 `✏️`。
+- 补全所有 SillyTavern Chat Completion source 的 label、secret、model 映射。
+
 ## v0.7.2
 
 - API 切换不再展开设置栏、滚动到连接按钮或把页面带离聊天。

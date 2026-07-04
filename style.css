@@ -28,6 +28,11 @@
     font-size: 18px;
 }
 
+.sttb-pencil-icon {
+    font-size: 17px;
+    line-height: 1;
+}
+
 #st-tool-ball-panel {
     position: fixed;
     z-index: 3999;

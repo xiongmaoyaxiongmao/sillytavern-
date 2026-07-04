@@ -26,10 +26,31 @@
 
     const SOURCE_ALIASES = Object.freeze({
         anthropic: CHAT_SOURCE_CLAUDE,
+        'anthropic-claude': CHAT_SOURCE_CLAUDE,
         google: CHAT_SOURCE_MAKERSUITE,
+        ai_studio: CHAT_SOURCE_MAKERSUITE,
+        aistudio: CHAT_SOURCE_MAKERSUITE,
         'google-ai-studio': CHAT_SOURCE_MAKERSUITE,
         google_ai_studio: CHAT_SOURCE_MAKERSUITE,
         gemini: CHAT_SOURCE_MAKERSUITE,
+        'azure-openai': 'azure_openai',
+        azure: 'azure_openai',
+        'ai-ml-api': 'aimlapi',
+        aiml: 'aimlapi',
+        'x-ai': 'xai',
+        'mistral-ai': 'mistralai',
+        mistral: 'mistralai',
+        'electron-hub': 'electronhub',
+        'nano-gpt': 'nanogpt',
+        nanogptai: 'nanogpt',
+        'workers-ai': 'workers_ai',
+        cloudflare: 'workers_ai',
+        'cloudflare-workers-ai': 'workers_ai',
+        glm: 'zai',
+        z_ai: 'zai',
+        'z-ai': 'zai',
+        'silicon-flow': 'siliconflow',
+        'mini-max': 'minimax',
     });
 
     const SOURCE_LABELS = Object.freeze({
@@ -94,25 +115,67 @@
         [CHAT_SOURCE_CUSTOM]: 'custom_model',
         [CHAT_SOURCE_CLAUDE]: 'claude_model',
         [CHAT_SOURCE_MAKERSUITE]: 'google_model',
+        openai: 'openai_model',
+        openrouter: 'openrouter_model',
+        ai21: 'ai21_model',
+        vertexai: 'vertexai_model',
+        mistralai: 'mistralai_model',
+        cohere: 'cohere_model',
+        perplexity: 'perplexity_model',
+        groq: 'groq_model',
+        electronhub: 'electronhub_model',
+        chutes: 'chutes_model',
+        nanogpt: 'nanogpt_model',
+        deepseek: 'deepseek_model',
+        aimlapi: 'aimlapi_model',
+        xai: 'xai_model',
+        pollinations: 'pollinations_model',
+        moonshot: 'moonshot_model',
+        fireworks: 'fireworks_model',
+        cometapi: 'cometapi_model',
         azure_openai: 'azure_openai_model',
+        zai: 'zai_model',
+        siliconflow: 'siliconflow_model',
         workers_ai: 'workers_ai_model',
+        minimax: 'minimax_model',
     });
 
     const SOURCE_MODEL_SELECTORS = Object.freeze({
         [CHAT_SOURCE_CUSTOM]: '#custom_model_id',
         [CHAT_SOURCE_CLAUDE]: '#model_claude_select',
         [CHAT_SOURCE_MAKERSUITE]: '#model_google_select',
+        openai: '#model_openai_select',
+        openrouter: '#model_openrouter_select',
+        ai21: '#model_ai21_select',
+        vertexai: '#model_vertexai_select',
+        mistralai: '#model_mistralai_select',
+        cohere: '#model_cohere_select',
+        perplexity: '#model_perplexity_select',
+        groq: '#model_groq_select',
+        electronhub: '#model_electronhub_select',
+        chutes: '#model_chutes_select',
+        nanogpt: '#model_nanogpt_select',
+        deepseek: '#model_deepseek_select',
+        aimlapi: '#model_aimlapi_select',
+        xai: '#model_xai_select',
+        pollinations: '#model_pollinations_select',
+        moonshot: '#model_moonshot_select',
+        fireworks: '#model_fireworks_select',
+        cometapi: '#model_cometapi_select',
         azure_openai: '#azure_openai_model',
+        zai: '#model_zai_select',
+        siliconflow: '#model_siliconflow_select',
         workers_ai: '#model_workers_ai_select',
+        minimax: '#model_minimax_select',
     });
 
     const SOURCE_ENDPOINT_FIELDS = Object.freeze({
-        [CHAT_SOURCE_CUSTOM]: { setting: 'custom_url', selector: '#custom_api_url_text' },
-        siliconflow: { setting: 'siliconflow_endpoint', selector: '#siliconflow_endpoint' },
-        minimax: { setting: 'minimax_endpoint', selector: '#minimax_endpoint' },
-        zai: { setting: 'zai_endpoint', selector: '#zai_endpoint' },
-        azure_openai: { setting: 'azure_base_url', selector: '#azure_base_url' },
-        workers_ai: { setting: 'workers_ai_account_id', selector: '#workers_ai_account_id' },
+        [CHAT_SOURCE_CUSTOM]: { setting: 'custom_url', selector: '#custom_api_url_text', configKey: 'customUrl' },
+        siliconflow: { setting: 'siliconflow_endpoint', selector: '#siliconflow_endpoint', configKey: 'siliconflowEndpoint' },
+        minimax: { setting: 'minimax_endpoint', selector: '#minimax_endpoint', configKey: 'minimaxEndpoint' },
+        zai: { setting: 'zai_endpoint', selector: '#zai_endpoint', configKey: 'zaiEndpoint' },
+        azure_openai: { setting: 'azure_base_url', selector: '#azure_base_url', configKey: 'azureBaseUrl' },
+        workers_ai: { setting: 'workers_ai_account_id', selector: '#workers_ai_account_id', configKey: 'workersAiAccountId' },
     });
 
     const REVERSE_PROXY_SOURCES = new Set([
@@ -178,7 +241,8 @@
 
     function normalizeSource(source) {
         const normalized = String(source || CHAT_SOURCE_CUSTOM).trim().toLowerCase();
-        return SOURCE_ALIASES[normalized] || normalized || CHAT_SOURCE_CUSTOM;
+        const aliased = SOURCE_ALIASES[normalized] || normalized;
+        return SOURCE_LABELS[aliased] ? aliased : CHAT_SOURCE_CUSTOM;
     }
 
     function sourceLabel(source) {
@@ -333,6 +397,10 @@
     }
 
     function getConfigEndpoint(config, source = getConfigSource(config)) {
+        const field = SOURCE_ENDPOINT_FIELDS[source];
+        if (field) {
+            return firstString(config?.[field.configKey], config?.[field.setting], config?.endpoint, config?.customUrl, config?.url, config?.baseUrl, config?.reverseProxy);
+        }
         if (source === CHAT_SOURCE_CUSTOM) {
             return firstString(config?.customUrl, config?.url, config?.endpoint, config?.baseUrl, config?.reverseProxy);
         }
@@ -811,7 +879,7 @@
                         <em>${endpoint}${model}${secret}</em>
                     </button>
                     <button type="button" class="sttb-icon-btn" data-action="apply-api" data-key="${escapeHtml(item.key)}" title="连接" ${busy ? 'disabled' : ''}>
-                        <i class="fa-solid ${busy ? 'fa-spinner fa-spin' : 'fa-plug-circle-bolt'}"></i>
+                        ${busy ? '<i class="fa-solid fa-spinner fa-spin"></i>' : '<span class="sttb-pencil-icon" aria-hidden="true">✏️</span>'}
                     </button>
                 </article>`;
         }).join('');
@@ -1009,7 +1077,7 @@
                     <button type="button" class="sttb-icon-btn" id="${ID}-close" title="关闭"><i class="fa-solid fa-xmark"></i></button>
                 </header>
                 <nav class="sttb-tabs" id="${ID}-tabs">
-                    <button type="button" data-tab="api"><i class="fa-solid fa-plug-circle-bolt"></i><span>API</span><b id="${ID}-api-count">0</b></button>
+                    <button type="button" data-tab="api"><span class="sttb-pencil-icon" aria-hidden="true">✏️</span><span>API</span><b id="${ID}-api-count">0</b></button>
                     <button type="button" data-tab="search"><i class="fa-solid fa-magnifying-glass"></i><span>搜索</span></button>
                     <button type="button" data-tab="favorites"><i class="fa-solid fa-star"></i><span>收藏</span><b id="${ID}-favorite-count">0</b></button>
                 </nav>
