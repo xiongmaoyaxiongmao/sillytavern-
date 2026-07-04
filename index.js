@@ -222,6 +222,10 @@
         }
     }
 
+    function wait(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     async function importFirst(paths) {
         let lastError = null;
         for (const path of paths) {
@@ -393,6 +397,16 @@
             .includes(filter));
     }
 
+    function emitElementEvents(element) {
+        if (typeof globalThis.$ === 'function') {
+            globalThis.$(element).trigger('input').trigger('change');
+            return;
+        }
+
+        element.dispatchEvent(new Event('input', { bubbles: true }));
+        element.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
     function setElementValue(selector, value, { addMissingOption = false, emit = true } = {}) {
         const element = document.querySelector(selector);
         if (!element) {
@@ -406,19 +420,33 @@
 
         element.value = text;
         if (emit) {
-            element.dispatchEvent(new Event('input', { bubbles: true }));
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            try {
-                globalThis.$?.(element).trigger('input').trigger('change');
-            } catch {
-                // jQuery is optional here.
-            }
+            emitElementEvents(element);
         }
         return true;
     }
 
-    function setSource(source, oaiSettings) {
-        setElementValue('#chat_completion_source', source, { addMissingOption: true });
+    async function ensureMainApiChatCompletion(coreModule) {
+        const mainApiSelect = document.querySelector('#main_api');
+        const currentMainApi = firstString(coreModule?.main_api, mainApiSelect?.value);
+        if (currentMainApi === MAIN_API_CHAT_COMPLETION && (!mainApiSelect || mainApiSelect.value === MAIN_API_CHAT_COMPLETION)) {
+            return;
+        }
+
+        const changedSelect = setElementValue('#main_api', MAIN_API_CHAT_COMPLETION, { addMissingOption: true });
+        if (!changedSelect && typeof coreModule?.changeMainAPI === 'function') {
+            coreModule.changeMainAPI(MAIN_API_CHAT_COMPLETION);
+        }
+
+        await wait(80);
+
+        if (coreModule?.main_api && coreModule.main_api !== MAIN_API_CHAT_COMPLETION && typeof coreModule.changeMainAPI === 'function') {
+            coreModule.changeMainAPI(MAIN_API_CHAT_COMPLETION);
+            await wait(40);
+        }
+    }
+
+    function setSource(source, oaiSettings, { emit = true } = {}) {
+        setElementValue('#chat_completion_source', source, { addMissingOption: true, emit });
         if (oaiSettings) {
             oaiSettings.chat_completion_source = source;
         }
@@ -505,21 +533,6 @@
         }
     }
 
-    function triggerConnectButton() {
-        const button = document.querySelector('#api_button_openai');
-        if (!button) {
-            throw new Error('未找到 API 连接按钮，请打开 OpenAI/Chat Completions 设置页后重试');
-        }
-
-        try {
-            globalThis.$?.(button).trigger('click');
-            return;
-        } catch {
-            // Fall back to native events.
-        }
-        button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    }
-
     function revealChatCompletionSettings() {
         const leftPanel = document.querySelector('#left-nav-panel');
         const leftToggle = document.querySelector('#ai-config-button .drawer-toggle');
@@ -544,9 +557,11 @@
         renderApiList();
 
         try {
+            const coreModule = await getCoreModule();
             const openAiModule = await getOpenAiModule();
             const oaiSettings = openAiModule?.oai_settings || {};
-            setSource(item.source, oaiSettings);
+            await ensureMainApiChatCompletion(coreModule);
+            setSource(item.source, oaiSettings, { emit: false });
             setEndpoint(item, oaiSettings);
             setModel(item, oaiSettings);
             await activateSecret(item);
@@ -558,7 +573,7 @@
             saveSettings();
 
             revealChatCompletionSettings();
-            triggerConnectButton();
+            setSource(item.source, oaiSettings);
             globalThis.toastr?.success?.(`正在连接：${item.name}`, 'SillyTavern Tool Ball');
         } catch (error) {
             console.error('[SillyTavern Tool Ball] API switch failed:', error);

@@ -5,6 +5,11 @@
 - API 管理器配置快捷连接。
 - 当前聊天文字搜索与收藏。
 
+## v0.7.1
+
+- API 切换前先把 SillyTavern 主 API 切到 Chat Completions/OpenAI。
+- 切换时先静默写入来源、endpoint、model、secret，最后只触发一次 SillyTavern 原生重连。
+
 ## v0.7.0
 
 - 删除旧的 profile 守护、恢复、slash 串行切换和重复写入流程。
