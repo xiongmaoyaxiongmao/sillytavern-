@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f6f3eb">
+  <title>存档拾光 · SillyTavern 聊天搜索</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="/" aria-label="存档拾光首页">
+      <span class="brand-mark" aria-hidden="true">拾</span>
+      <span><span class="brand-title">存档拾光</span><span class="brand-subtitle">SillyTavern 聊天搜索</span></span>
+    </a>
+    <div class="index-area">
+      <div class="index-copy"><span id="index-status" role="status">正在连接本地存档…</span><span id="index-detail" class="muted">读取索引状态</span></div>
+      <button id="refresh-index" class="button button-subtle" type="button">更新索引</button>
+    </div>
+  </header>
+  <div id="global-notice" class="global-notice" hidden role="status"></div>
+  <main class="workspace">
+    <section id="search-panel" class="search-panel" aria-label="搜索聊天存档">
+      <div class="search-controls">
+        <p class="eyebrow">把记忆，找回来</p>
+        <h1>搜索聊天存档</h1>
+        <form id="search-form" role="search">
+          <label for="query" class="sr-only">搜索关键词，多个词用空格分隔</label>
+          <div class="search-field">
+            <input id="query" name="query" type="search" placeholder="一句话、一个名字，或几个关键词" autocomplete="off" spellcheck="false">
+            <button class="button button-primary" type="submit">搜索</button>
+          </div>
+          <div class="filter-grid">
+            <label class="field-label" for="character">角色<select id="character" name="character"><option value="">全部角色</option></select></label>
+            <label class="field-label" for="role">说话方<select id="role" name="role"><option value="">全部</option><option value="user">用户</option><option value="assistant">角色</option><option value="system">系统</option></select></label>
+          </div>
+          <div class="filter-bottom"><label class="checkbox-label"><input id="include-hidden" type="checkbox">包含隐藏消息</label><button id="clear-search" class="text-button" type="button">清空筛选</button></div>
+          <p class="search-hint">多个关键词用空格分隔，查找同时包含这些词的消息。</p>
+        </form>
+      </div>
+      <div class="results-topline"><h2 id="results-title">全部存档</h2><span id="result-count" aria-live="polite" aria-atomic="true"></span></div>
+      <div id="search-progress" class="search-progress" hidden role="status">正在搜索存档…</div>
+      <div id="results" class="results" aria-busy="true"><div class="empty-state"><span class="empty-symbol" aria-hidden="true">⋯</span><h3>正在打开存档</h3><p>马上就可以搜索所有角色的聊天记录。</p></div></div>
+      <nav id="results-pagination" class="pagination" aria-label="存档结果分页" hidden><button id="results-prev" class="button button-subtle" type="button">上一页</button><span id="results-page"></span><button id="results-next" class="button button-subtle" type="button">下一页</button></nav>
+      <details class="source-details"><summary>存档来源与索引详情</summary><p id="source-path">正在读取…</p><p id="source-note" class="muted">索引只读取本机聊天存档；聊天内容不会上传。</p><ul id="index-errors" hidden></ul></details>
+    </section>
+    <section id="reader-panel" class="reader-panel" aria-label="聊天记录阅读区">
+      <div id="reader-empty" class="reader-empty"><div class="reading-illustration" aria-hidden="true"><span>“</span><i></i><i></i><i></i></div><p class="eyebrow">那些聊过的，仍在这里</p><h2>打开一份存档</h2><p>在左侧搜索关键词，或挑选一份聊天记录。<br>点选搜索片段，就能读到前后的完整对话。</p><div class="privacy-note"><span aria-hidden="true">●</span> 本地读取 · 原始存档保持不变</div></div>
+      <div id="reader-content" class="reader-content" hidden>
+        <header class="reader-header">
+          <button id="back-to-results" class="text-button mobile-back" type="button">← 返回搜索结果</button>
+          <p id="reader-character" class="eyebrow"></p><h2 id="reader-title" tabindex="-1"></h2>
+          <div class="reader-meta"><span id="reader-meta"></span><button id="copy-path" class="text-button" type="button" disabled>复制存档路径</button></div>
+          <div class="reader-tools"><div class="match-navigation" aria-label="关键词命中导航"><button id="match-prev" class="icon-button" type="button" aria-label="上一处命中" title="上一处命中" disabled>↑</button><span id="match-counter" role="status">完整聊天</span><button id="match-next" class="icon-button" type="button" aria-label="下一处命中" title="下一处命中" disabled>↓</button></div><span id="reader-range" class="muted"></span></div>
+          <div id="reader-query" class="reader-query" hidden></div>
+        </header>
+        <div id="reader-status" class="reader-status" role="status" hidden></div>
+        <div id="messages" class="messages" aria-busy="false" tabindex="0" aria-label="聊天消息"></div>
+        <nav class="reader-pagination" aria-label="聊天消息分页"><button id="messages-prev" class="button button-subtle" type="button" disabled>← 更早的 80 条</button><span id="message-page"></span><button id="messages-next" class="button button-subtle" type="button" disabled>后面的 80 条 →</button></nav>
+      </div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

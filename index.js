@@ -203,6 +203,8 @@
         activeResultIndex: -1,
         busyApiKey: '',
         dragging: false,
+        jumpRequestId: 0,
+        jumpQueue: Promise.resolve(),
     };
 
     const elements = {};
@@ -646,7 +648,9 @@
     }
 
     function getMessageText(message) {
-        return firstString(getActiveSwipeText(message), message?.mes, message?.message);
+        if (typeof message?.mes === 'string') return message.mes;
+        if (typeof message?.message === 'string') return message.message;
+        return getActiveSwipeText(message);
     }
 
     function getMessageRole(message) {
@@ -679,13 +683,13 @@
     }
 
     function makePreview(text, query, caseSensitive) {
-        const plain = stripHtml(text).replace(/\s+/g, ' ').trim();
+        const plain = normalizeText(text, true);
         if (!plain) {
             return '空消息';
         }
 
         const haystack = caseSensitive ? plain : plain.toLocaleLowerCase();
-        const needle = caseSensitive ? query : query.toLocaleLowerCase();
+        const needle = normalizeText(query, caseSensitive);
         const index = needle ? haystack.indexOf(needle) : -1;
         const start = Math.max(0, (index >= 0 ? index : 0) - 44);
         const end = Math.min(plain.length, (index >= 0 ? index : 0) + Math.max(needle.length, 1) + 90);
@@ -818,37 +822,86 @@
         updateFavoriteCount();
     }
 
-    function findMessageElement(id) {
-        const escaped = typeof CSS !== 'undefined' && typeof CSS.escape === 'function' ? CSS.escape(String(id)) : String(id).replace(/"/g, '\\"');
-        return document.querySelector(`.mes[mesid="${escaped}"], .mes[data-message-id="${escaped}"], .mes[data-mes-id="${escaped}"]`);
+    function getRenderedMessageId(element) {
+        for (const attribute of ['mesid', 'data-message-id', 'data-mes-id']) {
+            const value = element.getAttribute(attribute);
+            if (value === null || value.trim() === '') continue;
+            const id = Number(value);
+            if (Number.isInteger(id) && id >= 0) return id;
+        }
+        return null;
     }
 
-    async function ensureMessageElement(id) {
-        let element = findMessageElement(id);
-        if (element) {
-            return element;
-        }
+    function getRenderedMessages() {
+        const container = document.getElementById('chat');
+        return Array.from(container?.children ?? [])
+            .filter(element => element.matches('.mes') && getRenderedMessageId(element) !== null);
+    }
 
-        const firstRendered = Math.min(...Array.from(document.querySelectorAll('.mes[mesid]'))
-            .map(node => Number(node.getAttribute('mesid')))
-            .filter(Number.isInteger));
-        if (Number.isFinite(firstRendered) && Number(id) < firstRendered) {
-            const core = await getCoreModule().catch(() => null);
-            await core?.showMoreMessages?.(Math.max(1, firstRendered - Number(id) + 4));
+    function findMessageElement(id) {
+        return getRenderedMessages().find(element => getRenderedMessageId(element) === id) ?? null;
+    }
+
+    async function ensureMessageElement(id, isCurrent) {
+        if (!isCurrent()) return null;
+        let element = findMessageElement(id);
+        if (element) return element;
+
+        const rendered = getRenderedMessages().map(getRenderedMessageId);
+        const firstRendered = rendered.length ? Math.min(...rendered) : getContext().chat.length;
+        if (id < firstRendered) {
+            const core = await getCoreModule();
+            if (!isCurrent()) return null;
+            if (typeof core?.showMoreMessages !== 'function') {
+                throw new Error('当前 SillyTavern 没有可用的旧消息加载接口');
+            }
+            await core.showMoreMessages(Math.min(getContext().chat.length, firstRendered - id + 4));
+            if (!isCurrent()) return null;
             element = findMessageElement(id);
         }
         return element;
     }
 
     async function jumpToMessage(id) {
-        const element = await ensureMessageElement(id);
-        if (!element) {
-            globalThis.toastr?.warning?.(`第 ${id} 楼还没有渲染，先在聊天里加载旧消息后再跳转。`, 'SillyTavern Tool Ball');
+        const requestId = ++state.jumpRequestId;
+        const context = getContext();
+        if (!Number.isInteger(id) || id < 0 || !Array.isArray(context?.chat) || id >= context.chat.length) {
+            globalThis.toastr?.warning?.('这条消息已不存在，请重新搜索。', 'SillyTavern Tool Ball');
             return;
         }
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.classList.add('sttb-flash-message');
-        setTimeout(() => element.classList.remove('sttb-flash-message'), 1600);
+        const chat = context.chat;
+        const chatId = context.getCurrentChatId?.();
+        const characterId = context.characterId;
+        const groupId = context.groupId;
+        const message = chat[id];
+        const isCurrent = () => {
+            const current = getContext();
+            return requestId === state.jumpRequestId && current?.chat === chat
+                && current.getCurrentChatId?.() === chatId
+                && current.characterId === characterId && current.groupId === groupId
+                && current.chat[id] === message;
+        };
+        // Serialize loads, but only the latest click may scroll or show feedback.
+        const task = state.jumpQueue.catch(() => {}).then(async () => {
+            if (!isCurrent()) return;
+            try {
+                const element = await ensureMessageElement(id, isCurrent);
+                if (!isCurrent()) return;
+                if (!element) {
+                    globalThis.toastr?.warning?.(`第 ${id} 楼加载后仍无法定位，请重新搜索。`, 'SillyTavern Tool Ball');
+                    return;
+                }
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                element.classList.add('sttb-flash-message');
+                setTimeout(() => element.classList.remove('sttb-flash-message'), 1600);
+            } catch (error) {
+                if (isCurrent()) {
+                    globalThis.toastr?.warning?.(`无法加载第 ${id} 楼：${error.message}`, 'SillyTavern Tool Ball');
+                }
+            }
+        });
+        state.jumpQueue = task;
+        return task;
     }
 
     function renderApiList() {

@@ -1,0 +1,61 @@
+# 存档拾光 · SillyTavern 聊天搜索
+
+一个在本机运行的独立搜索窗口。输入关键词，跨角色找到聊天存档，直接打开命中的那一楼及前后文。
+
+## 打开
+
+在 Finder 中双击 **打开聊天搜索.command**。首次启动会读取聊天并建立索引，页面会显示进度；以后启动只更新发生变化的存档。
+
+默认地址：<http://127.0.0.1:18765>。服务运行期间可以收藏这个地址。关闭网页后后台服务仍可继续使用；重启电脑后再次双击打开即可。
+
+默认读取：`~/SillyTavern-Launcher/SillyTavern/data/default-user`。
+
+## 使用
+
+- 输入一个词或一句话查找；空格分隔的多个词要求同时出现在同一条消息中。英文不区分大小写，支持一两个字的中文关键词。
+- 可限定角色、说话方，或选择显示隐藏消息。没有关键词时可以浏览所有存档。
+- 结果按存档分组，显示命中数量和正文片段。点击片段，阅读窗口会定位到对应楼层。
+- 阅读窗口可前后翻页，或跳到上一个、下一个命中。楼层沿用 SillyTavern 的编号，从第 0 楼开始。
+- 在 SillyTavern 里产生新聊天或修改旧聊天后，点“更新索引”。每次重新启动服务也会检查变化。
+
+搜索范围是单聊和群聊的当前已保存正文 `mes`，不包含历史重生成候选、MMPEA 记忆元数据或单独的推理字段。网页把聊天中的 HTML 转为文字显示，不运行聊天中的脚本或交互卡片。
+
+## 数据与运行
+
+原始聊天文件只读。索引和运行日志保存在：
+
+`~/Library/Application Support/SillyTavern Archive Search`
+
+索引包含聊天正文，属于本地私人数据，不应上传到 GitHub。工具只监听 `127.0.0.1`，不调用模型或外部服务。页面不依赖网络字体或外部脚本。
+
+需要 Python 3.9 或更新版本，不需要安装第三方库。SQLite 支持相应功能时，会分别为长词与一两个字的短词建立索引；较旧的 SQLite 会使用精确子串搜索。
+
+要读取其他 SillyTavern 用户目录，可在终端指定包含 `chats` / `group chats` 的目录：
+
+```sh
+python3 launch.py --data-root "/path/to/SillyTavern/data/default-user"
+```
+
+若同时开不同数据目录，为每份数据指定独立端口和索引目录：
+
+```sh
+python3 launch.py --data-root "/path/to/other-user" --port 18766 --state-dir "/path/to/private-index"
+```
+
+手动前台运行服务，按 Ctrl+C 退出：
+
+```sh
+python3 server.py
+```
+
+## 与小工具球的关系
+
+这个工具沿用 [SillyTavern Tool Ball](https://github.com/xiongmaoyaxiongmao/sillytavern-) 的命中片段、高亮和楼层定位思路，独立实现跨存档索引与阅读。小工具球搜索的是当前打开的聊天；本工具可搜索整个用户聊天目录。原插件的 API 管理和写入聊天 metadata 的收藏功能仍属于原插件。
+
+## 验证
+
+```sh
+python3 -m unittest -v test_archive.py
+```
+
+验证使用临时样例存档，覆盖中文短词、多关键词、群聊首条消息、隐藏消息、上下文与分页、增量更新、损坏文件保留旧索引、数据目录暂时不可用、本机访问限制，以及源文件未被改写。
