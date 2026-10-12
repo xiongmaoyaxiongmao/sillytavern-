@@ -15,11 +15,6 @@
         ballY: null,
         activeTab: 'api',
         apiFilter: '',
-        searchQuery: '',
-        caseSensitive: false,
-        includeNames: true,
-        includeHidden: true,
-        maxResults: 300,
         activeApiKey: '',
         activeApiName: '',
     });
@@ -192,19 +187,20 @@
 
     const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
-    const SEARCH_DEBOUNCE_MS = 100;
+    const ARCHIVE_ORIGIN = `http://${location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'}:18765`;
+    const ARCHIVE_PARENTS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
 
     const state = {
         coreModulePromise: null,
         openAiModulePromise: null,
         apiItems: [],
-        searchResults: [],
-        searchTimer: null,
-        activeResultIndex: -1,
         busyApiKey: '',
         dragging: false,
         jumpRequestId: 0,
         jumpQueue: Promise.resolve(),
+        archiveStarted: false,
+        archiveReady: false,
+        archiveTimer: null,
     };
 
     const elements = {};
@@ -633,116 +629,8 @@
         return div.textContent || div.innerText || '';
     }
 
-    function normalizeText(value, caseSensitive) {
-        const text = stripHtml(value).replace(/\s+/g, ' ').trim();
-        return caseSensitive ? text : text.toLocaleLowerCase();
-    }
-
-    function getActiveSwipeText(message) {
-        if (!Array.isArray(message?.swipes) || !message.swipes.length) {
-            return '';
-        }
-        const index = Number.isInteger(message.swipe_id) ? message.swipe_id : 0;
-        const swipe = message.swipes[Math.max(0, Math.min(index, message.swipes.length - 1))];
-        return typeof swipe === 'string' ? swipe : firstString(swipe?.mes, swipe?.message);
-    }
-
-    function getMessageText(message) {
-        if (typeof message?.mes === 'string') return message.mes;
-        if (typeof message?.message === 'string') return message.message;
-        return getActiveSwipeText(message);
-    }
-
-    function getMessageRole(message) {
-        if (message?.role) return String(message.role);
-        if (message?.is_user) return 'user';
-        if (message?.is_system) return 'system';
-        return 'assistant';
-    }
-
-    function isHiddenMessage(message) {
-        return Boolean(message?.is_hidden || message?.is_system || message?.hide_message || message?.extra?.is_hidden || message?.extra?.hide_message);
-    }
-
     function roleLabel(role) {
         return ({ user: '用户', assistant: '角色', system: '系统' })[role] || role || '消息';
-    }
-
-    function getChatMessages() {
-        const chat = getContext()?.chat;
-        if (!Array.isArray(chat)) {
-            return [];
-        }
-        return chat.map((message, index) => ({
-            id: index,
-            name: firstString(message?.name, roleLabel(getMessageRole(message))),
-            role: getMessageRole(message),
-            hidden: isHiddenMessage(message),
-            text: getMessageText(message),
-        }));
-    }
-
-    function makePreview(text, query, caseSensitive) {
-        const plain = normalizeText(text, true);
-        if (!plain) {
-            return '空消息';
-        }
-
-        const haystack = caseSensitive ? plain : plain.toLocaleLowerCase();
-        const needle = normalizeText(query, caseSensitive);
-        const index = needle ? haystack.indexOf(needle) : -1;
-        const start = Math.max(0, (index >= 0 ? index : 0) - 44);
-        const end = Math.min(plain.length, (index >= 0 ? index : 0) + Math.max(needle.length, 1) + 90);
-        const snippet = `${start > 0 ? '...' : ''}${plain.slice(start, end)}${end < plain.length ? '...' : ''}`;
-
-        if (!needle || index < 0) {
-            return escapeHtml(snippet);
-        }
-
-        const local = (caseSensitive ? snippet : snippet.toLocaleLowerCase()).indexOf(needle);
-        if (local < 0) {
-            return escapeHtml(snippet);
-        }
-        return `${escapeHtml(snippet.slice(0, local))}<mark>${escapeHtml(snippet.slice(local, local + needle.length))}</mark>${escapeHtml(snippet.slice(local + needle.length))}`;
-    }
-
-    function runSearch() {
-        const settings = getSettings();
-        const query = settings.searchQuery.trim();
-        if (!query) {
-            state.searchResults = [];
-            state.activeResultIndex = -1;
-            renderSearchResults();
-            return;
-        }
-
-        const needle = normalizeText(query, settings.caseSensitive);
-        const results = [];
-        for (const message of getChatMessages()) {
-            if (!settings.includeHidden && message.hidden) {
-                continue;
-            }
-            const source = settings.includeNames ? `${message.name}\n${message.text}` : message.text;
-            if (!normalizeText(source, settings.caseSensitive).includes(needle)) {
-                continue;
-            }
-            results.push({
-                ...message,
-                preview: makePreview(source, query, settings.caseSensitive),
-            });
-            if (results.length >= settings.maxResults) {
-                break;
-            }
-        }
-
-        state.searchResults = results;
-        state.activeResultIndex = results.length ? 0 : -1;
-        renderSearchResults();
-    }
-
-    function scheduleSearch() {
-        clearTimeout(state.searchTimer);
-        state.searchTimer = setTimeout(runSearch, SEARCH_DEBOUNCE_MS);
     }
 
     function getFavoriteStore() {
@@ -817,7 +705,6 @@
             globalThis.toastr?.success?.(`已收藏第 ${message.id} 楼`, 'SillyTavern Tool Ball');
         }
         await saveFavorites();
-        renderSearchResults();
         renderFavorites();
         updateFavoriteCount();
     }
@@ -938,41 +825,6 @@
         }).join('');
     }
 
-    function renderSearchResults() {
-        if (!elements.searchList) {
-            return;
-        }
-
-        const settings = getSettings();
-        const query = settings.searchQuery.trim();
-        elements.searchStatus.textContent = query
-            ? `${state.searchResults.length} 条结果`
-            : '输入关键词搜索当前聊天';
-
-        if (!query) {
-            elements.searchList.innerHTML = '<div class="sttb-empty">搜索当前聊天记录</div>';
-            return;
-        }
-        if (!state.searchResults.length) {
-            elements.searchList.innerHTML = '<div class="sttb-empty">没有匹配结果</div>';
-            return;
-        }
-
-        elements.searchList.innerHTML = state.searchResults.map((message, index) => {
-            const favorite = Boolean(findFavorite(message.id));
-            return `
-                <article class="sttb-message-item${index === state.activeResultIndex ? ' active' : ''}">
-                    <button type="button" class="sttb-message-main" data-action="jump-message" data-id="${message.id}">
-                        <strong>#${message.id} ${escapeHtml(message.name)}</strong>
-                        <p>${message.preview}</p>
-                    </button>
-                    <button type="button" class="sttb-icon-btn" data-action="toggle-favorite" data-id="${message.id}" title="${favorite ? '取消收藏' : '收藏'}">
-                        <i class="fa-${favorite ? 'solid' : 'regular'} fa-star"></i>
-                    </button>
-                </article>`;
-        }).join('');
-    }
-
     function renderFavorites() {
         if (!elements.favoriteList) {
             return;
@@ -1003,6 +855,45 @@
         }
     }
 
+    function archiveIsVisible() {
+        return elements.panel.classList.contains('open') && getSettings().activeTab === 'search';
+    }
+
+    function loadArchive() {
+        clearTimeout(state.archiveTimer);
+        state.archiveStarted = true;
+        state.archiveReady = false;
+        elements.archiveFrame.hidden = true;
+        elements.archiveNotice.hidden = false;
+        elements.archiveRetry.hidden = true;
+        if (!ARCHIVE_PARENTS.has(location.origin)) {
+            elements.archiveStatus.textContent = '请从本机酒馆打开存档搜索';
+            elements.archiveHelp.textContent = '内嵌搜索支持 http://127.0.0.1:8000 或 http://localhost:8000。';
+            return;
+        }
+        elements.archiveStatus.textContent = '正在连接存档搜索…';
+        elements.archiveHelp.textContent = '搜索所有角色的聊天记录，点选结果即可阅读上下文。';
+        const url = new URL('/', ARCHIVE_ORIGIN);
+        url.searchParams.set('embed', 'tool-ball');
+        url.searchParams.set('parentOrigin', location.origin);
+        url.searchParams.set('reload', String(Date.now()));
+        elements.archiveFrame.src = url.href;
+        state.archiveTimer = setTimeout(() => {
+            if (state.archiveReady) return;
+            elements.archiveStatus.textContent = '暂时无法连接本地存档搜索';
+            elements.archiveHelp.textContent = '请在本插件的 outputs/chat-archive-search 文件夹中，双击“打开聊天搜索.command”，启动后点击“重新连接”。更新插件后若仍无法连接，请重启本地搜索服务。';
+            elements.archiveRetry.hidden = false;
+        }, 6000);
+    }
+
+    function syncArchiveVisibility() {
+        const visible = archiveIsVisible();
+        if (visible && !state.archiveStarted) loadArchive();
+        if (state.archiveReady) {
+            elements.archiveFrame.contentWindow?.postMessage({ type: 'sttb:archive-visibility', visible }, ARCHIVE_ORIGIN);
+        }
+    }
+
     function setActiveTab(tab) {
         const settings = getSettings();
         settings.activeTab = tab;
@@ -1015,11 +906,10 @@
         }
 
         if (tab === 'api') renderApiList();
-        if (tab === 'search') {
-            renderSearchResults();
-            setTimeout(() => elements.searchInput?.focus(), 0);
-        }
         if (tab === 'favorites') renderFavorites();
+        elements.panel.classList.toggle('sttb-archive-open', tab === 'search');
+        syncArchiveVisibility();
+        positionPanel();
     }
 
     function setPanelOpen(open) {
@@ -1029,6 +919,8 @@
             const tab = getSettings().activeTab || 'api';
             setActiveTab(tab);
             positionPanel();
+        } else {
+            syncArchiveVisibility();
         }
     }
 
@@ -1055,8 +947,9 @@
             return;
         }
         const settings = getBallSettings();
-        const panelWidth = Math.min(420, window.innerWidth - 24);
-        const panelHeight = Math.min(620, window.innerHeight - 24);
+        const archive = getSettings().activeTab === 'search';
+        const panelWidth = Math.min(archive ? 1040 : 420, window.innerWidth - 24);
+        const panelHeight = Math.min(archive ? 820 : 620, window.innerHeight - 24);
         let left = settings.ballX + 58;
         let top = settings.ballY - 8;
         if (left + panelWidth > window.innerWidth - 12) {
@@ -1142,18 +1035,13 @@
                         </label>
                         <div class="sttb-list" id="${ID}-api-list"></div>
                     </section>
-                    <section class="sttb-view" data-view="search">
-                        <label class="sttb-field">
-                            <i class="fa-solid fa-magnifying-glass"></i>
-                            <input type="search" id="${ID}-search-input" placeholder="搜索当前聊天" autocomplete="off">
-                        </label>
-                        <div class="sttb-options">
-                            <label><input type="checkbox" id="${ID}-case"> 区分大小写</label>
-                            <label><input type="checkbox" id="${ID}-names"> 搜索名字</label>
-                            <label><input type="checkbox" id="${ID}-hidden"> 包含隐藏</label>
+                    <section class="sttb-view sttb-archive-view" data-view="search">
+                        <div class="sttb-archive-notice" id="${ID}-archive-notice" role="status">
+                            <strong id="${ID}-archive-status">正在连接存档搜索…</strong>
+                            <p id="${ID}-archive-help">搜索所有角色的聊天记录，点选结果即可阅读上下文。</p>
+                            <button type="button" id="${ID}-archive-retry" hidden>重新连接</button>
                         </div>
-                        <div class="sttb-status" id="${ID}-search-status">输入关键词搜索当前聊天</div>
-                        <div class="sttb-list" id="${ID}-search-list"></div>
+                        <iframe id="${ID}-archive-frame" title="全部聊天存档搜索与阅读" sandbox="allow-scripts allow-same-origin allow-forms" allow="clipboard-write" referrerpolicy="no-referrer" hidden></iframe>
                     </section>
                     <section class="sttb-view" data-view="favorites">
                         <div class="sttb-list" id="${ID}-favorite-list"></div>
@@ -1170,20 +1058,15 @@
         elements.apiFilter = document.getElementById(`${ID}-api-filter`);
         elements.apiList = document.getElementById(`${ID}-api-list`);
         elements.favoriteCount = document.getElementById(`${ID}-favorite-count`);
-        elements.searchInput = document.getElementById(`${ID}-search-input`);
-        elements.caseSensitive = document.getElementById(`${ID}-case`);
-        elements.includeNames = document.getElementById(`${ID}-names`);
-        elements.includeHidden = document.getElementById(`${ID}-hidden`);
-        elements.searchStatus = document.getElementById(`${ID}-search-status`);
-        elements.searchList = document.getElementById(`${ID}-search-list`);
+        elements.archiveFrame = document.getElementById(`${ID}-archive-frame`);
+        elements.archiveNotice = document.getElementById(`${ID}-archive-notice`);
+        elements.archiveStatus = document.getElementById(`${ID}-archive-status`);
+        elements.archiveHelp = document.getElementById(`${ID}-archive-help`);
+        elements.archiveRetry = document.getElementById(`${ID}-archive-retry`);
         elements.favoriteList = document.getElementById(`${ID}-favorite-list`);
 
         const settings = getSettings();
         elements.apiFilter.value = settings.apiFilter;
-        elements.searchInput.value = settings.searchQuery;
-        elements.caseSensitive.checked = Boolean(settings.caseSensitive);
-        elements.includeNames.checked = Boolean(settings.includeNames);
-        elements.includeHidden.checked = Boolean(settings.includeHidden);
 
         attachDrag();
         positionBall();
@@ -1207,26 +1090,15 @@
             renderApiList();
         });
 
-        elements.searchInput.addEventListener('input', () => {
-            getSettings().searchQuery = elements.searchInput.value;
-            saveSettings();
-            scheduleSearch();
-        });
-
-        elements.caseSensitive.addEventListener('change', () => {
-            getSettings().caseSensitive = elements.caseSensitive.checked;
-            saveSettings();
-            scheduleSearch();
-        });
-        elements.includeNames.addEventListener('change', () => {
-            getSettings().includeNames = elements.includeNames.checked;
-            saveSettings();
-            scheduleSearch();
-        });
-        elements.includeHidden.addEventListener('change', () => {
-            getSettings().includeHidden = elements.includeHidden.checked;
-            saveSettings();
-            scheduleSearch();
+        elements.archiveRetry.addEventListener('click', () => loadArchive());
+        window.addEventListener('message', event => {
+            if (event.origin !== ARCHIVE_ORIGIN || event.source !== elements.archiveFrame.contentWindow
+                || event.data?.type !== 'sttb:archive-ready' || event.data?.version !== 1) return;
+            clearTimeout(state.archiveTimer);
+            state.archiveReady = true;
+            elements.archiveNotice.hidden = true;
+            elements.archiveFrame.hidden = false;
+            syncArchiveVisibility();
         });
 
         elements.panel.addEventListener('click', async event => {
@@ -1240,9 +1112,6 @@
                 await applyApiItem(item);
             } else if (actionName === 'jump-message') {
                 await jumpToMessage(Number(id));
-            } else if (actionName === 'toggle-favorite') {
-                const message = state.searchResults.find(result => String(result.id) === String(id));
-                await toggleFavorite(message);
             } else if (actionName === 'remove-favorite') {
                 const message = getFavorites().find(item => String(item.id) === String(id));
                 await toggleFavorite(message);
@@ -1257,9 +1126,6 @@
         repairRelayConfigs();
         renderApiList();
         renderFavorites();
-        if (getSettings().searchQuery.trim()) {
-            runSearch();
-        }
     }
 
     function waitForSillyTavern(attempt = 0) {

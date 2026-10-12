@@ -4,6 +4,11 @@
   const $ = (id) => document.getElementById(id);
   const PAGE_SIZE = 30;
   const MESSAGE_PAGE_SIZE = 80;
+  const parameters = new URLSearchParams(location.search);
+  const parentOrigin = parameters.get('parentOrigin');
+  const embedded = window.parent !== window && parameters.get('embed') === 'tool-ball'
+    && ['http://127.0.0.1:8000', 'http://localhost:8000'].includes(parentOrigin);
+  if (embedded) document.body.classList.add('embedded');
   const state = {
     searchSequence: 0, searchController: null, searchSnapshot: null,
     searchOffset: 0, searchData: null, lastRequestedSearch: null,
@@ -13,7 +18,7 @@
     matchSequence: 0, matchController: null, matches: [], matchError: false,
     status: null, statusFailure: false, seenIndexVersion: null,
     indexWasRunning: false, polling: null, refreshing: false,
-    toastTimer: null, charactersSequence: 0,
+    toastTimer: null, charactersSequence: 0, embeddedHidden: false, statusBusy: false,
   };
 
   function node(tag, className, text) {
@@ -483,6 +488,8 @@
 
   async function pollStatus() {
     clearTimeout(state.polling);
+    if (state.embeddedHidden || state.statusBusy) return;
+    state.statusBusy = true;
     try {
       const data = await request('/api/status');
       const previousVersion = state.seenIndexVersion;
@@ -508,7 +515,8 @@
       $('global-notice').textContent = errorText(error);
       $('refresh-index').disabled = false;
     } finally {
-      state.polling = setTimeout(pollStatus, state.status?.indexing ? 2000 : 8000);
+      state.statusBusy = false;
+      if (!state.embeddedHidden) state.polling = setTimeout(pollStatus, state.status?.indexing ? 2000 : 8000);
     }
   }
 
@@ -549,5 +557,16 @@
   });
   $('refresh-index').addEventListener('click', refreshIndex);
   window.addEventListener('pagehide', () => { clearTimeout(state.polling); });
+  if (embedded) {
+    window.addEventListener('message', event => {
+      if (event.origin !== parentOrigin || event.source !== window.parent
+        || event.data?.type !== 'sttb:archive-visibility' || typeof event.data.visible !== 'boolean') return;
+      const wasHidden = state.embeddedHidden;
+      state.embeddedHidden = !event.data.visible;
+      if (state.embeddedHidden) clearTimeout(state.polling);
+      else if (wasHidden) pollStatus();
+    });
+    window.parent.postMessage({ type: 'sttb:archive-ready', version: 1 }, parentOrigin);
+  }
   pollStatus(); loadCharacters(); search();
 })();

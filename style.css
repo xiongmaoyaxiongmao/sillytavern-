@@ -164,26 +164,6 @@
     font: inherit;
 }
 
-.sttb-options {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px 12px;
-    font-size: 12px;
-    opacity: 0.9;
-}
-
-.sttb-options label {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-}
-
-.sttb-status {
-    min-height: 20px;
-    font-size: 12px;
-    color: color-mix(in srgb, var(--SmartThemeBodyColor, #ffffff) 78%, transparent);
-}
-
 .sttb-list {
     min-height: 180px;
     max-height: min(470px, calc(100vh - 190px));
@@ -306,4 +286,64 @@
     .sttb-tabs button span {
         display: none;
     }
+}
+
+#st-tool-ball-panel.sttb-archive-open {
+    width: min(1040px, calc(100vw - 24px));
+    height: min(820px, calc(100dvh - 24px));
+    max-height: calc(100dvh - 24px);
+}
+
+.sttb-archive-open > .sttb-header,
+.sttb-archive-open > .sttb-tabs {
+    flex-shrink: 0;
+}
+
+.sttb-archive-open > .sttb-views,
+.sttb-archive-view.active {
+    flex: 1;
+}
+
+.sttb-archive-view {
+    padding: 0;
+    gap: 0;
+    position: relative;
+}
+
+.sttb-archive-view [hidden] {
+    display: none !important;
+}
+
+#st-tool-ball-archive-frame {
+    border: 0;
+    display: block;
+    width: 100%;
+    flex: 1;
+    min-height: 0;
+    background: #f7f4ed;
+}
+
+.sttb-archive-notice {
+    margin: auto;
+    max-width: 540px;
+    padding: 28px;
+    text-align: center;
+    font-size: 14px;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+    overflow-y: auto;
+}
+
+.sttb-archive-notice p {
+    margin: 14px 0;
+    opacity: 0.8;
+}
+
+.sttb-archive-notice button {
+    padding: 8px 16px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    color: inherit;
+    background: transparent;
+    cursor: pointer;
 }

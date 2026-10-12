@@ -158,7 +158,8 @@ class ArchiveFlow(unittest.TestCase):
         self.assertEqual(paged['total_chats'], 3)
 
     def test_08_local_access_boundary(self):
-        for headers in [{'Host': 'evil.example'}, {'Origin': 'https://evil.example'}]:
+        for headers in [{'Host': 'evil.example'}, {'Origin': 'https://evil.example'},
+                        {'Origin': 'http://127.0.0.1:8000'}, {'Sec-Fetch-Site': 'cross-site'}]:
             req = Request(self.url + '/api/status', headers=headers)
             with self.assertRaises(HTTPError) as error:
                 urlopen(req, timeout=3)
@@ -167,6 +168,18 @@ class ArchiveFlow(unittest.TestCase):
         with self.assertRaises(HTTPError) as error:
             urlopen(req, timeout=3)
         self.assertIn(error.exception.code, [400, 403, 415])
+
+    def test_08b_embed_permission_does_not_expose_api(self):
+        with urlopen(self.url + '/?embed=tool-ball&parentOrigin=http://127.0.0.1:8000') as response:
+            policy = response.headers['Content-Security-Policy']
+            self.assertIn('frame-ancestors http://127.0.0.1:8000 http://localhost:8000', policy)
+            self.assertIsNone(response.headers.get('Access-Control-Allow-Origin'))
+        req = Request(self.url + '/api/refresh', data=b'{}', headers={
+            'Content-Type': 'application/json', 'Origin': 'http://127.0.0.1:8000',
+        })
+        with self.assertRaises(HTTPError) as error:
+            urlopen(req, timeout=3)
+        self.assertEqual(error.exception.code, 403)
 
     def test_09_incremental_update_failure_preservation_and_delete(self):
         # Only fixture files are changed; no production data is used in this suite.
