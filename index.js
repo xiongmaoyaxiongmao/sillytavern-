@@ -187,8 +187,8 @@
 
     const CORE_MODULE_PATHS = Object.freeze(['/script.js', './script.js', '../script.js']);
     const OPENAI_MODULE_PATHS = Object.freeze(['/scripts/openai.js', './scripts/openai.js', '../scripts/openai.js']);
-    const ARCHIVE_ORIGIN = `http://${location.hostname === 'localhost' ? 'localhost' : '127.0.0.1'}:18765`;
-    const ARCHIVE_PARENTS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
+    const ARCHIVE_ORIGIN = location.origin;
+    const ARCHIVE_URL = new URL('/api/plugins/tool-ball-archive/', ARCHIVE_ORIGIN);
 
     const state = {
         coreModulePromise: null,
@@ -859,31 +859,42 @@
         return elements.panel.classList.contains('open') && getSettings().activeTab === 'search';
     }
 
-    function loadArchive() {
+    async function loadArchive() {
         clearTimeout(state.archiveTimer);
         state.archiveStarted = true;
         state.archiveReady = false;
         elements.archiveFrame.hidden = true;
         elements.archiveNotice.hidden = false;
         elements.archiveRetry.hidden = true;
-        if (!ARCHIVE_PARENTS.has(location.origin)) {
-            elements.archiveStatus.textContent = '请从本机酒馆打开存档搜索';
-            elements.archiveHelp.textContent = '内嵌搜索支持 http://127.0.0.1:8000 或 http://localhost:8000。';
-            return;
-        }
-        elements.archiveStatus.textContent = '正在连接存档搜索…';
-        elements.archiveHelp.textContent = '搜索所有角色的聊天记录，点选结果即可阅读上下文。';
-        const url = new URL('/', ARCHIVE_ORIGIN);
-        url.searchParams.set('embed', 'tool-ball');
-        url.searchParams.set('parentOrigin', location.origin);
-        url.searchParams.set('reload', String(Date.now()));
-        elements.archiveFrame.src = url.href;
-        state.archiveTimer = setTimeout(() => {
-            if (state.archiveReady) return;
-            elements.archiveStatus.textContent = '暂时无法连接本地存档搜索';
-            elements.archiveHelp.textContent = '请在本插件的 outputs/chat-archive-search 文件夹中，双击“打开聊天搜索.command”，启动后点击“重新连接”。更新插件后若仍无法连接，请重启本地搜索服务。';
+        elements.archiveStatus.textContent = '正在连接电脑上的存档搜索…';
+        elements.archiveHelp.textContent = '手机和电脑共用酒馆地址，首次连接时会自动启动搜索服务。';
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 25000);
+        const failed = message => {
+            elements.archiveStatus.textContent = '暂时无法连接存档搜索';
+            elements.archiveHelp.textContent = message;
             elements.archiveRetry.hidden = false;
-        }, 6000);
+        };
+        try {
+            const response = await fetch(new URL('api/status', ARCHIVE_URL), { cache: 'no-store', signal: controller.signal });
+            const status = await response.json().catch(() => null);
+            if (!response.ok || status?.app !== 'sillytavern-archive-search') {
+                throw new Error(status?.error || '请在电脑上安装球球的服务端连接，并重启一次酒馆。安装方法见插件说明；手机无需另开程序。');
+            }
+            const url = new URL(ARCHIVE_URL);
+            url.searchParams.set('embed', 'tool-ball');
+            url.searchParams.set('parentOrigin', location.origin);
+            url.searchParams.set('reload', String(Date.now()));
+            elements.archiveFrame.src = url.href;
+            state.archiveTimer = setTimeout(() => {
+                if (!state.archiveReady) failed('存档界面未能加载，请刷新酒馆页面后重新连接。');
+            }, 6000);
+        } catch (error) {
+            failed(error.name === 'AbortError' || error instanceof TypeError
+                ? '无法连接酒馆，请确认电脑上的酒馆仍在运行，再重新连接。' : error.message);
+        } finally {
+            clearTimeout(timeout);
+        }
     }
 
     function syncArchiveVisibility() {

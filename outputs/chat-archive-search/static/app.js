@@ -7,7 +7,8 @@
   const parameters = new URLSearchParams(location.search);
   const parentOrigin = parameters.get('parentOrigin');
   const embedded = window.parent !== window && parameters.get('embed') === 'tool-ball'
-    && ['http://127.0.0.1:8000', 'http://localhost:8000'].includes(parentOrigin);
+    && parentOrigin === location.origin;
+  const serviceBase = new URL('./', location.href);
   if (embedded) document.body.classList.add('embedded');
   const state = {
     searchSequence: 0, searchController: null, searchSnapshot: null,
@@ -84,7 +85,15 @@
   }
 
   async function request(path, options = {}) {
-    const response = await fetch(path, { cache: 'no-store', ...options });
+    const headers = new Headers(options.headers);
+    if (embedded && options.method && options.method !== 'GET') {
+      const response = await fetch('/csrf-token', { cache: 'no-store' });
+      if (!response.ok) throw new Error('酒馆登录状态已失效，请刷新酒馆页面。');
+      const data = await response.json();
+      if (typeof data.token !== 'string') throw new Error('无法验证酒馆会话，请刷新酒馆页面。');
+      headers.set('X-CSRF-Token', data.token);
+    }
+    const response = await fetch(new URL(path.replace(/^\//, ''), serviceBase), { cache: 'no-store', ...options, headers });
     let data;
     try { data = await response.json(); } catch { throw new Error('服务返回了无法读取的内容，请检查本地工具是否仍在运行。'); }
     if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
@@ -92,7 +101,7 @@
   }
 
   function errorText(error) {
-    if (error instanceof TypeError) return '无法连接本地服务，请确认存档拾光仍在运行。';
+    if (error instanceof TypeError) return embedded ? '无法连接存档服务，请确认电脑上的酒馆仍在运行。' : '无法连接本地服务，请确认存档拾光仍在运行。';
     return error?.message || '读取失败，请稍后重试。';
   }
 
@@ -508,7 +517,7 @@
       }
     } catch (error) {
       state.statusFailure = true;
-      $('index-status').textContent = '本地服务连接中断';
+      $('index-status').textContent = embedded ? '电脑上的搜索服务连接中断' : '本地服务连接中断';
       $('index-detail').textContent = '正在自动重连';
       $('index-status').parentElement.classList.add('is-error');
       $('global-notice').hidden = false;
